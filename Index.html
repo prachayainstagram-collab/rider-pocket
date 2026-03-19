@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rider Pocket - ระบบบัญชีไรเดอร์</title>
+    
+    <!-- นำเข้า Tailwind CSS เพื่อจัดการความสวยงาม -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- นำเข้า Babel เพื่อแปลภาษา React (JSX) ให้เบราว์เซอร์เข้าใจ -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-gray-50">
+    <!-- จุดที่ React จะนำแอปมาแสดงผล -->
+    <div id="root"></div>
+
+    <!-- โค้ด React ของแอปพลิเคชัน -->
+    <script type="text/babel" data-type="module">
+        // นำเข้า React และเครื่องมือที่จำเป็นผ่านเครือข่าย
+        import React, { useState, useMemo, useEffect } from 'https://esm.sh/react@18.2.0';
+        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+        import { 
+          Wallet, TrendingUp, TrendingDown, PlusCircle, List as ListIcon, 
+          Home, Trash2, Calendar, DollarSign, Bike, Coffee, Wrench, Wifi, MoreHorizontal 
+        } from 'https://esm.sh/lucide-react@0.292.0';
+
+        // ข้อมูลแพลตฟอร์มต่างๆ และสี
+        const PLATFORMS = {
+          'Grab': { color: 'bg-green-600', textColor: 'text-green-600' },
+          'LINE MAN': { color: 'bg-green-500', textColor: 'text-green-500' },
+          'Foodpanda': { color: 'bg-pink-600', textColor: 'text-pink-600' },
+          'ShopeeFood': { color: 'bg-orange-500', textColor: 'text-orange-500' },
+          'Lalamove': { color: 'bg-orange-600', textColor: 'text-orange-600' },
+          'inDrive': { color: 'bg-green-400', textColor: 'text-green-400' },
+          'Bolt': { color: 'bg-green-700', textColor: 'text-green-700' },
+          'อื่นๆ': { color: 'bg-gray-600', textColor: 'text-gray-600' }
+        };
+
+        const EXPENSE_CATEGORIES = {
+          'ค่าน้ำมัน': { icon: Bike, color: 'text-orange-500' },
+          'ค่าอาหาร/น้ำ': { icon: Coffee, color: 'text-blue-500' },
+          'ซ่อมบำรุงรถ': { icon: Wrench, color: 'text-gray-700' },
+          'ค่าเน็ต/โทรศัพท์': { icon: Wifi, color: 'text-purple-500' },
+          'อื่นๆ': { icon: MoreHorizontal, color: 'text-gray-500' }
+        };
+
+        // 🔴 นำ URL ที่ได้จาก Google Apps Script มาใส่ในเครื่องหมายคำพูดด้านล่างนี้ 🔴
+        const GOOGLE_SCRIPT_URL = ''; 
+
+        function App() {
+          const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, add, history
+          const [records, setRecords] = useState([]);
+          const [isLoading, setIsLoading] = useState(false);
+          
+          // Form State
+          const [formType, setFormType] = useState('income');
+          const [amount, setAmount] = useState('');
+          const [platform, setPlatform] = useState('Grab');
+          const [category, setCategory] = useState('ค่าน้ำมัน');
+          const [note, setNote] = useState('');
+          const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+          // ดึงข้อมูลจาก Google Sheets เมื่อเปิดแอปขึ้นมา
+          useEffect(() => {
+            if (!GOOGLE_SCRIPT_URL) return;
+            
+            setIsLoading(true);
+            fetch(GOOGLE_SCRIPT_URL)
+              .then(res => res.json())
+              .then(data => {
+                if(data && data.records) {
+                  setRecords(data.records);
+                }
+              })
+              .catch(err => console.error("เกิดข้อผิดพลาดในการดึงข้อมูล:", err))
+              .finally(() => setIsLoading(false));
+          }, []);
+
+          // คำนวณสรุปยอด
+          const summary = useMemo(() => {
+            let totalIncome = 0;
+            let totalExpense = 0;
+            const platformTotals = {};
+
+            records.forEach(record => {
+              const amt = parseFloat(record.amount);
+              if (record.type === 'income') {
+                totalIncome += amt;
+                platformTotals[record.platform] = (platformTotals[record.platform] || 0) + amt;
+              } else {
+                totalExpense += amt;
+              }
+            });
+
+            return {
+              totalIncome,
+              totalExpense,
+              net: totalIncome - totalExpense,
+              platformTotals
+            };
+          }, [records]);
+
+          // จัดการการบันทึกข้อมูล
+          const handleSave = async (e) => {
+            e.preventDefault();
+            if (!amount || isNaN(amount) || amount <= 0) return;
+
+            const newRecord = {
+              id: Date.now().toString(),
+              type: formType,
+              amount: parseFloat(amount),
+              date: date,
+              note: note,
+              ...(formType === 'income' ? { platform } : { category })
+            };
+
+            // อัปเดตหน้าจอทันทีเพื่อให้ผู้ใช้รู้สึกว่าแตะแล้วติดเลย
+            setRecords([newRecord, ...records]);
+            
+            // ส่งข้อมูลไปบันทึกที่ Google Sheets แบบเบื้องหลัง
+            if (GOOGLE_SCRIPT_URL) {
+              try {
+                await fetch(GOOGLE_SCRIPT_URL, {
+                  method: 'POST',
+                  mode: 'no-cors', // ป้องกันปัญหา CORS Policy
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(newRecord)
+                });
+              } catch (error) {
+                console.error("บันทึกข้อมูลลง Google Sheets ไม่สำเร็จ:", error);
+              }
+            }
+            
+            // Reset form
+            setAmount('');
+            setNote('');
+            setActiveTab('dashboard');
+          };
+
+          const deleteRecord = (id) => {
+            setRecords(records.filter(r => r.id !== id));
+          };
+
+          // --- ส่วนประกอบ UI ---
+          const renderDashboard = () => (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              {/* การ์ดสรุปยอดรวม */}
+              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-5 text-white shadow-lg">
+                <h2 className="text-blue-100 text-sm font-medium mb-1">กำไรสุทธิ (บาท)</h2>
+                <div className="text-4xl font-bold tracking-tight">
+                  ฿{summary.net.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4 mt-6">
+                  <div className="bg-white/10 rounded-xl p-3">
+                    <div className="flex items-center text-green-200 text-xs mb-1">
+                      <TrendingUp className="w-3 h-3 mr-1" /> รายรับรวม
+                    </div>
+                    <div className="text-lg font-semibold">฿{summary.totalIncome.toLocaleString('th-TH')}</div>
+                  </div>
+                  <div className="bg-white/10 rounded-xl p-3">
+                    <div className="flex items-center text-red-200 text-xs mb-1">
+                      <TrendingDown className="w-3 h-3 mr-1" /> รายจ่ายรวม
+                    </div>
+                    <div className="text-lg font-semibold">฿{summary.totalExpense.toLocaleString('th-TH')}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* สรุปรายได้แยกตามค่าย */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <h3 className="text-gray-800 font-semibold mb-4 flex items-center">
+                  <Bike className="w-5 h-5 mr-2 text-indigo-500" /> 
+                  รายได้แยกตามค่าย
+                </h3>
+                
+                {Object.keys(summary.platformTotals).length > 0 ? (
+                  <div className="space-y-3">
+                    {Object.entries(summary.platformTotals)
+                      .sort(([,a], [,b]) => b - a)
+                      .map(([plat, val]) => (
+                      <div key={plat} className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <div className={`w-3 h-3 rounded-full mr-3 ${PLATFORMS[plat]?.color || 'bg-gray-500'}`}></div>
+                          <span className="text-gray-700 font-medium">{plat}</span>
+                        </div>
+                        <div className="font-semibold text-gray-900">฿{val.toLocaleString('th-TH')}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-400 py-4 text-sm">
+                    ยังไม่มีข้อมูลรายรับ
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+
+          const renderAddRecord = () => (
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">เพิ่มรายการใหม่</h2>
+              
+              {/* ตัวสลับ รายรับ/รายจ่าย */}
+              <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
+                <button 
+                  onClick={() => setFormType('income')}
+                  className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
+                    formType === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'
+                  }`}
+                >
+                  + รายรับ (วิ่งงาน)
+                </button>
+                <button 
+                  onClick={() => setFormType('expense')}
+                  className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
+                    formType === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'
+                  }`}
+                >
+                  - รายจ่าย
+                </button>
+              </div>
+
+              <form onSubmit={handleSave} className="space-y-4">
+                {/* จำนวนเงิน */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนเงิน (บาท)</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <DollarSign className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      step="0.01"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      className="block w-full pl-10 pr-3 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-lg"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+
+                {/* เลือกค่าย หรือ หมวดหมู่ */}
+                {formType === 'income' ? (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">วิ่งค่ายไหน?</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.keys(PLATFORMS).map(plat => (
+                        <button
+                          key={plat}
+                          type="button"
+                          onClick={() => setPlatform(plat)}
+                          className={`py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
+                            platform === plat 
+                              ? `${PLATFORMS[plat].textColor} border-${PLATFORMS[plat].textColor.split('-')[1]}-500 bg-${PLATFORMS[plat].textColor.split('-')[1]}-50` 
+                              : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          {plat}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">หมวดหมู่รายจ่าย</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.entries(EXPENSE_CATEGORIES).map(([catName, catData]) => {
+                        const Icon = catData.icon;
+                        return (
+                          <button
+                            key={catName}
+                            type="button"
+                            onClick={() => setCategory(catName)}
+                            className={`flex items-center justify-center py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
+                              category === catName 
+                                ? `${catData.color} border-current bg-gray-50` 
+                                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                          >
+                            <Icon className="w-4 h-4 mr-2" /> {catName}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* วันที่ */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Calendar className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <input
+                      type="date"
+                      required
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      className="block w-full pl-10 pr-3 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                {/* หมายเหตุ */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ (ถ้ามี)</label>
+                  <input
+                    type="text"
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    className="block w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="เช่น ทิปลูกค้า, ปะยาง"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className={`w-full py-4 rounded-xl text-white font-bold text-lg shadow-md transition-all active:scale-[0.98] ${
+                    formType === 'income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
+                >
+                  บันทึก{formType === 'income' ? 'รายรับ' : 'รายจ่าย'}
+                </button>
+              </form>
+            </div>
+          );
+
+          const renderHistory = () => (
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 min-h-[60vh] animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">ประวัติการบันทึก</h2>
+              
+              {records.length === 0 ? (
+                <div className="text-center text-gray-400 py-10 flex flex-col items-center">
+                  <ListIcon className="w-12 h-12 mb-2 text-gray-300" />
+                  <p>ยังไม่มีประวัติการบันทึก</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {records.map(record => (
+                    <div key={record.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center">
+                        <div className={`p-2 rounded-full mr-3 ${record.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                          {record.type === 'income' ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-gray-800">
+                            {record.type === 'income' ? record.platform : record.category}
+                          </div>
+                          <div className="text-xs text-gray-500 flex items-center">
+                            {record.date} {record.note && <span className="ml-1 text-gray-400">({record.note})</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center">
+                        <span className={`font-bold mr-3 ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                          {record.type === 'income' ? '+' : '-'}฿{record.amount.toLocaleString('th-TH')}
+                        </span>
+                        <button 
+                          onClick={() => deleteRecord(record.id)}
+                          className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+
+          return (
+            <div className="min-h-screen bg-gray-50 font-sans pb-20">
+              {/* Header */}
+              <header className="bg-white px-5 py-4 shadow-sm sticky top-0 z-10 flex items-center">
+                <div className="bg-indigo-600 p-2 rounded-lg mr-3">
+                  <Wallet className="w-6 h-6 text-white" />
+                </div>
+                <h1 className="text-xl font-bold text-gray-800">Rider Pocket</h1>
+              </header>
+
+              {/* Main Content */}
+              <main className="max-w-md mx-auto p-4">
+                {activeTab === 'dashboard' && renderDashboard()}
+                {activeTab === 'add' && renderAddRecord()}
+                {activeTab === 'history' && renderHistory()}
+              </main>
+
+              {/* Bottom Navigation */}
+              <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe">
+                <div className="max-w-md mx-auto flex justify-around p-2">
+                  <button 
+                    onClick={() => setActiveTab('dashboard')}
+                    className={`flex flex-col items-center p-2 w-20 rounded-xl transition-all ${activeTab === 'dashboard' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    <Home className="w-6 h-6 mb-1" />
+                    <span className="text-[10px] font-medium">ภาพรวม</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => setActiveTab('add')}
+                    className={`flex flex-col items-center p-2 w-20 rounded-xl transition-all ${activeTab === 'add' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    <PlusCircle className="w-6 h-6 mb-1" />
+                    <span className="text-[10px] font-medium">บันทึก</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => setActiveTab('history')}
+                    className={`flex flex-col items-center p-2 w-20 rounded-xl transition-all ${activeTab === 'history' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    <ListIcon className="w-6 h-6 mb-1" />
+                    <span className="text-[10px] font-medium">ประวัติ</span>
+                  </button>
+                </div>
+              </nav>
+            </div>
+          );
+        }
+
+        // เริ่มต้นเรนเดอร์ React App
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
