@@ -5,9 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rider Pocket - ระบบบัญชีไรเดอร์</title>
     
+    <!-- เพิ่ม Meta Tags สำหรับการทำเป็น App บนมือถือ (PWA) -->
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    
     <!-- นำเข้า Tailwind CSS เพื่อจัดการความสวยงาม -->
     <script src="https://cdn.tailwindcss.com"></script>
     
+    <!-- ปรับแต่งพฤติกรรมบนมือถือเพิ่มเติม -->
+    <style>
+        /* จัดการขอบจอด้านล่างสำหรับ iPhone/Android รุ่นใหม่ */
+        .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 10px); }
+        /* ป้องกันการเด้งของหน้าจอเวลาเลื่อนสุด (เหมือนแอปจริง) */
+        body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+        /* ป้องกันการซูมหน้าจอเวลาพิมพ์บน iPhone */
+        input[type="number"], input[type="date"], input[type="time"], input[type="text"] { font-size: 16px !important; }
+    </style>
+
     <!-- นำเข้า Babel เพื่อแปลภาษา React (JSX) ให้เบราว์เซอร์เข้าใจ -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
@@ -22,7 +38,7 @@
         import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
         import { 
           Wallet, TrendingUp, TrendingDown, PlusCircle, List as ListIcon, 
-          Home, Trash2, Calendar, DollarSign, Bike, Coffee, Wrench, Wifi, MoreHorizontal 
+          Home, Trash2, Calendar, DollarSign, Bike, Coffee, Wrench, Wifi, MoreHorizontal, Clock 
         } from 'https://esm.sh/lucide-react@0.292.0';
 
         // ข้อมูลแพลตฟอร์มต่างๆ และสี
@@ -60,6 +76,7 @@
           const [category, setCategory] = useState('ค่าน้ำมัน');
           const [note, setNote] = useState('');
           const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+          const [time, setTime] = useState(new Date().toTimeString().split(' ')[0].substring(0, 5));
 
           // ดึงข้อมูลจาก Google Sheets เมื่อเปิดแอปขึ้นมา
           useEffect(() => {
@@ -81,12 +98,14 @@
           const summary = useMemo(() => {
             let totalIncome = 0;
             let totalExpense = 0;
+            let totalTrips = 0;
             const platformTotals = {};
 
             records.forEach(record => {
               const amt = parseFloat(record.amount);
               if (record.type === 'income') {
                 totalIncome += amt;
+                totalTrips += 1;
                 platformTotals[record.platform] = (platformTotals[record.platform] || 0) + amt;
               } else {
                 totalExpense += amt;
@@ -96,6 +115,7 @@
             return {
               totalIncome,
               totalExpense,
+              totalTrips,
               net: totalIncome - totalExpense,
               platformTotals
             };
@@ -111,6 +131,7 @@
               type: formType,
               amount: parseFloat(amount),
               date: date,
+              time: time,
               note: note,
               ...(formType === 'income' ? { platform } : { category })
             };
@@ -137,6 +158,7 @@
             // Reset form
             setAmount('');
             setNote('');
+            setTime(new Date().toTimeString().split(' ')[0].substring(0, 5));
             setActiveTab('dashboard');
           };
 
@@ -154,16 +176,22 @@
                   ฿{summary.net.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4 mt-6">
-                  <div className="bg-white/10 rounded-xl p-3">
+                <div className="grid grid-cols-3 gap-3 mt-6">
+                  <div className="bg-white/10 rounded-xl p-3 flex flex-col items-center justify-center">
+                    <div className="flex items-center text-blue-200 text-xs mb-1">
+                      <Bike className="w-3 h-3 mr-1" /> รอบวิ่ง
+                    </div>
+                    <div className="text-lg font-semibold">{summary.totalTrips}</div>
+                  </div>
+                  <div className="bg-white/10 rounded-xl p-3 flex flex-col items-center justify-center">
                     <div className="flex items-center text-green-200 text-xs mb-1">
-                      <TrendingUp className="w-3 h-3 mr-1" /> รายรับรวม
+                      <TrendingUp className="w-3 h-3 mr-1" /> รายรับ
                     </div>
                     <div className="text-lg font-semibold">฿{summary.totalIncome.toLocaleString('th-TH')}</div>
                   </div>
-                  <div className="bg-white/10 rounded-xl p-3">
+                  <div className="bg-white/10 rounded-xl p-3 flex flex-col items-center justify-center">
                     <div className="flex items-center text-red-200 text-xs mb-1">
-                      <TrendingDown className="w-3 h-3 mr-1" /> รายจ่ายรวม
+                      <TrendingDown className="w-3 h-3 mr-1" /> รายจ่าย
                     </div>
                     <div className="text-lg font-semibold">฿{summary.totalExpense.toLocaleString('th-TH')}</div>
                   </div>
@@ -173,7 +201,7 @@
               {/* สรุปรายได้แยกตามค่าย */}
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
                 <h3 className="text-gray-800 font-semibold mb-4 flex items-center">
-                  <Bike className="w-5 h-5 mr-2 text-indigo-500" /> 
+                  <Wallet className="w-5 h-5 mr-2 text-indigo-500" /> 
                   รายได้แยกตามค่าย
                 </h3>
                 
@@ -202,7 +230,7 @@
 
           const renderAddRecord = () => (
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">เพิ่มรายการใหม่</h2>
+              <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">บันทึกงาน / รายจ่าย</h2>
               
               {/* ตัวสลับ รายรับ/รายจ่าย */}
               <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
@@ -212,7 +240,7 @@
                     formType === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'
                   }`}
                 >
-                  + รายรับ (วิ่งงาน)
+                  + ค่ารอบ (รายรับ)
                 </button>
                 <button 
                   onClick={() => setFormType('expense')}
@@ -227,19 +255,23 @@
               <form onSubmit={handleSave} className="space-y-4">
                 {/* จำนวนเงิน */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนเงิน (บาท)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {formType === 'income' ? 'ค่ารอบที่ได้ + ทิป (บาท)' : 'จำนวนเงิน (บาท)'}
+                  </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <DollarSign className="h-5 w-5 text-gray-400" />
                     </div>
                     <input
                       type="number"
+                      inputMode="decimal"
+                      pattern="[0-9]*"
                       required
                       min="1"
                       step="0.01"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      className="block w-full pl-10 pr-3 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-lg"
+                      className="block w-full pl-10 pr-3 py-4 border-2 border-indigo-100 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-2xl font-bold text-gray-800"
                       placeholder="0.00"
                     />
                   </div>
@@ -257,7 +289,7 @@
                           onClick={() => setPlatform(plat)}
                           className={`py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
                             platform === plat 
-                              ? `${PLATFORMS[plat].textColor} border-${PLATFORMS[plat].textColor.split('-')[1]}-500 bg-${PLATFORMS[plat].textColor.split('-')[1]}-50` 
+                              ? `${PLATFORMS[plat].textColor} border-${PLATFORMS[plat].textColor.split('-')[1]}-500 bg-${PLATFORMS[plat].textColor.split('-')[1]}-50 shadow-sm` 
                               : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                           }`}
                         >
@@ -279,7 +311,7 @@
                             onClick={() => setCategory(catName)}
                             className={`flex items-center justify-center py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
                               category === catName 
-                                ? `${catData.color} border-current bg-gray-50` 
+                                ? `${catData.color} border-current bg-gray-50 shadow-sm` 
                                 : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                             }`}
                           >
@@ -291,20 +323,37 @@
                   </div>
                 )}
 
-                {/* วันที่ */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Calendar className="h-5 w-5 text-gray-400" />
+                {/* วันที่ และ เวลา */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Calendar className="h-4 w-4 text-gray-400" />
+                      </div>
+                      <input
+                        type="date"
+                        required
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                        className="block w-full pl-9 pr-2 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                      />
                     </div>
-                    <input
-                      type="date"
-                      required
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                      className="block w-full pl-10 pr-3 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">เวลา</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Clock className="h-4 w-4 text-gray-400" />
+                      </div>
+                      <input
+                        type="time"
+                        required
+                        value={time}
+                        onChange={(e) => setTime(e.target.value)}
+                        className="block w-full pl-9 pr-2 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -316,7 +365,7 @@
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                     className="block w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="เช่น ทิปลูกค้า, ปะยาง"
+                    placeholder={formType === 'income' ? "เช่น ลูกค้าให้ทิป, รหัสงาน..." : "เช่น ปะยาง, ข้าวมันไก่..."}
                   />
                 </div>
 
@@ -326,7 +375,7 @@
                     formType === 'income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
                   }`}
                 >
-                  บันทึก{formType === 'income' ? 'รายรับ' : 'รายจ่าย'}
+                  บันทึก{formType === 'income' ? 'ค่ารอบ' : 'รายจ่าย'}
                 </button>
               </form>
             </div>
@@ -347,14 +396,15 @@
                     <div key={record.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors">
                       <div className="flex items-center">
                         <div className={`p-2 rounded-full mr-3 ${record.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                          {record.type === 'income' ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                          {record.type === 'income' ? <Bike className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
                         </div>
                         <div>
                           <div className="font-semibold text-gray-800">
-                            {record.type === 'income' ? record.platform : record.category}
+                            {record.type === 'income' ? `งาน ${record.platform}` : record.category}
                           </div>
                           <div className="text-xs text-gray-500 flex items-center">
-                            {record.date} {record.note && <span className="ml-1 text-gray-400">({record.note})</span>}
+                            {record.date} {record.time ? `• ${record.time} น.` : ''} 
+                            {record.note && <span className="ml-1 text-gray-400 truncate max-w-[100px]">({record.note})</span>}
                           </div>
                         </div>
                       </div>
@@ -409,7 +459,7 @@
                     className={`flex flex-col items-center p-2 w-20 rounded-xl transition-all ${activeTab === 'add' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'}`}
                   >
                     <PlusCircle className="w-6 h-6 mb-1" />
-                    <span className="text-[10px] font-medium">บันทึก</span>
+                    <span className="text-[10px] font-medium">บันทึกรอบ</span>
                   </button>
                   
                   <button 
