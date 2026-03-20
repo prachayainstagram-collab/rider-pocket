@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rider Pocket - ระบบบัญชีไรเดอร์</title>
     
+    <!-- เพิ่ม Meta Tags สำหรับการทำเป็น App บนมือถือ (PWA) -->
     <meta name="theme-color" content="#4f46e5">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     
+    <!-- นำเข้า Tailwind CSS เพื่อจัดการความสวยงาม -->
     <script src="https://cdn.tailwindcss.com"></script>
     
+    <!-- ปรับแต่งพฤติกรรมบนมือถือเพิ่มเติม -->
     <style>
         /* จัดการขอบจอด้านล่างสำหรับ iPhone/Android รุ่นใหม่ */
         .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 10px); }
@@ -21,18 +24,22 @@
         input[type="number"], input[type="date"], input[type="time"], input[type="text"] { font-size: 16px !important; }
     </style>
 
+    <!-- นำเข้า Babel เพื่อแปลภาษา React (JSX) ให้เบราว์เซอร์เข้าใจ -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-gray-50">
+    <!-- จุดที่ React จะนำแอปมาแสดงผล -->
     <div id="root"></div>
 
+    <!-- โค้ด React ของแอปพลิเคชัน -->
     <script type="text/babel" data-type="module">
         // นำเข้า React และเครื่องมือที่จำเป็นผ่านเครือข่าย
         import React, { useState, useMemo, useEffect } from 'https://esm.sh/react@18.2.0';
         import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
         import { 
           Wallet, TrendingUp, TrendingDown, PlusCircle, List as ListIcon, 
-          Home, Trash2, Calendar, DollarSign, Bike, Coffee, Wrench, Wifi, MoreHorizontal, Clock 
+          Home, Trash2, Calendar, DollarSign, Bike, Coffee, Wrench, Wifi, MoreHorizontal, Clock,
+          Play, StopCircle, Sun, CheckCircle2
         } from 'https://esm.sh/lucide-react@0.292.0';
 
         // นำเข้า Firebase SDK
@@ -60,7 +67,16 @@
           'อื่นๆ': { icon: MoreHorizontal, color: 'text-gray-500' }
         };
 
-        // 🔴 นำ Firebase Config ของคุณมาวางที่นี่ 🔴
+        const GREETINGS = [
+          "ขอให้วันนี้เป็นวันที่ดี ออเดอร์ปังๆ ทิปแน่นๆ นะครับ! 🛵💨",
+          "ขับขี่ปลอดภัย ลูกค้าน่ารัก ได้โบนัสรัวๆ ครับ! 🌟",
+          "สู้ๆ ครับไรเดอร์คนเก่ง วันนี้เป้าหมายทะลุเป้าแน่นอน! 💪",
+          "อากาศจะร้อนหรือฝนจะตก ก็ขอให้ใจร่มๆ ได้งานเยอะๆ นะครับ! 🌤️",
+          "เริ่มต้นวันใหม่ ขอให้เงินไหลมาเทมา ปลอดภัยตลอดสายครับ! 💸",
+          "ลุยเลย! ถนนโล่งๆ ลูกค้ารอแจกทิปอยู่ครับ 🎉"
+        ];
+
+        // 🔴 Firebase Config ของคุณ 🔴
         const myFirebaseConfig = {
           apiKey: "AIzaSyAOuX9u4eYf8OVFS_Djqceu1MAiasPa5Wc",
           authDomain: "rider-ca9e9.firebaseapp.com",
@@ -88,6 +104,13 @@
           const [connectionError, setConnectionError] = useState('');
           const [user, setUser] = useState(null);
           
+          // Work Status State ('idle', 'working', 'on_break') ดึงค่าจาก Local Storage ให้จำค่าไว้
+          const [workStatus, setWorkStatus] = useState(() => localStorage.getItem('riderWorkStatus') || 'idle');
+          
+          // Modal State สำหรับแสดงคำอวยพรและยืนยันจบงาน
+          const [modalConfig, setModalConfig] = useState({ isOpen: false, type: null });
+          const [currentGreeting, setCurrentGreeting] = useState('');
+          
           // Form State
           const [formType, setFormType] = useState('income');
           const [amount, setAmount] = useState('');
@@ -96,6 +119,11 @@
           const [note, setNote] = useState('');
           const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
           const [time, setTime] = useState(new Date().toTimeString().split(' ')[0].substring(0, 5));
+
+          // อัปเดต Local Storage ทุกครั้งที่ Work Status เปลี่ยนแปลง
+          useEffect(() => {
+            localStorage.setItem('riderWorkStatus', workStatus);
+          }, [workStatus]);
 
           // 1. จัดการระบบล็อกอิน (แบบไม่ระบุตัวตน - Anonymous) เพื่อให้มีสิทธิ์บันทึกข้อมูล
           useEffect(() => {
@@ -108,7 +136,7 @@
                 }
               } catch (error) {
                 console.error("Auth error:", error);
-                setConnectionError(`Auth error: ${error.message} (อย่าลืมเปิด Anonymous Auth ในหน้าเว็บ Firebase นะครับ)`);
+                setConnectionError(`Auth error: ${error.message}`);
               }
             };
             initAuth();
@@ -124,10 +152,8 @@
             setIsLoading(true);
             setConnectionError('');
             
-            // อ้างอิงไปยังกล่องเก็บข้อมูลของผู้ใช้นี้ (แยกกล่องของใครของมันด้วยรหัส user.uid)
             const recordsRef = collection(db, 'artifacts', currentAppId, 'users', user.uid, 'records');
             
-            // onSnapshot จะดึงข้อมูลและอัปเดตหน้าจอทันทีที่มีการเปลี่ยนแปลง
             const unsubscribe = onSnapshot(recordsRef, (snapshot) => {
               const data = [];
               snapshot.forEach((doc) => {
@@ -145,11 +171,11 @@
               setIsLoading(false);
             }, (error) => {
               console.error("Firebase fetch error:", error);
-              setConnectionError("ไม่สามารถดึงข้อมูลได้ โปรดตรวจสอบ Rules ของ Firestore ว่าอนุญาตให้อ่าน/เขียนหรือไม่");
+              setConnectionError("ไม่สามารถดึงข้อมูลได้ โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต");
               setIsLoading(false);
             });
             
-            return () => unsubscribe(); // ยกเลิกการดึงข้อมูลเมื่อปิดหน้าแอป
+            return () => unsubscribe(); 
           }, [user]);
 
           // คำนวณสรุปยอด
@@ -159,6 +185,8 @@
             let totalTrips = 0;
             const platformTotals = {};
 
+            // เพื่อให้แม่นยำขึ้น เราสามารถกรองข้อมูลเฉพาะของ 'วันนี้' ได้ที่นี่ในอนาคต
+            // แต่ตอนนี้ใช้รวมทั้งหมดก่อนตามโค้ดเดิม
             records.forEach(record => {
               const amt = parseFloat(record.amount);
               if (record.type === 'income') {
@@ -195,18 +223,16 @@
             };
             
             try {
-              // สร้าง Document ใหม่พร้อม ID อัตโนมัติใน Firebase
               const newDocRef = doc(collection(db, 'artifacts', currentAppId, 'users', user.uid, 'records'));
               await setDoc(newDocRef, newRecord);
               
-              // ล้างฟอร์ม (หน้าจอประวัติจะอัปเดตเองแบบ Real-time)
               setAmount('');
               setNote('');
               setTime(new Date().toTimeString().split(' ')[0].substring(0, 5));
               setActiveTab('dashboard');
             } catch (error) {
               console.error("บันทึกข้อมูลลง Firebase ไม่สำเร็จ:", error);
-              setConnectionError("บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือเช็ค Rule");
+              setConnectionError("บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
             }
           };
 
@@ -220,6 +246,35 @@
             }
           };
 
+          // --- ฟังก์ชันจัดการสถานะการทำงาน ---
+          const handleStartWork = () => {
+            const randomMsg = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+            setCurrentGreeting(randomMsg);
+            setWorkStatus('working');
+            setModalConfig({ isOpen: true, type: 'greeting' });
+          };
+
+          const handleTakeBreak = () => {
+            setWorkStatus('on_break');
+          };
+
+          const handleResumeWork = () => {
+            setWorkStatus('working');
+          };
+
+          const promptEndWork = () => {
+            setModalConfig({ isOpen: true, type: 'end_confirm' });
+          };
+
+          const handleEndWork = () => {
+            setWorkStatus('idle');
+            setModalConfig({ isOpen: false, type: null });
+          };
+
+          const closeModal = () => {
+            setModalConfig({ isOpen: false, type: null });
+          };
+
           // --- ส่วนประกอบ UI ---
           const renderDashboard = () => (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -231,10 +286,49 @@
                 </div>
               )}
 
+              {/* วิดเจ็ต: สถานะการทำงาน */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-gray-800 font-semibold flex items-center">
+                    <Clock className="w-5 h-5 mr-2 text-indigo-500" /> สถานะงานวันนี้
+                  </h3>
+                  {workStatus === 'working' && <span className="flex items-center text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded-full"><span className="w-2 h-2 rounded-full bg-green-500 mr-1 animate-pulse"></span> กำลังวิ่งงาน</span>}
+                  {workStatus === 'on_break' && <span className="flex items-center text-xs font-bold text-amber-600 bg-amber-100 px-2 py-1 rounded-full"><Coffee className="w-3 h-3 mr-1" /> พักผ่อน</span>}
+                </div>
+
+                {workStatus === 'idle' && (
+                  <button onClick={handleStartWork} className="w-full bg-gradient-to-r from-indigo-600 to-blue-500 text-white font-bold py-4 rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center active:scale-[0.98]">
+                    <Play className="w-6 h-6 mr-2" fill="currentColor" /> เริ่มงานวันนี้
+                  </button>
+                )}
+
+                {workStatus === 'working' && (
+                  <div className="flex space-x-3">
+                    <button onClick={handleTakeBreak} className="flex-1 bg-amber-100 text-amber-700 font-bold py-3 rounded-xl hover:bg-amber-200 transition flex items-center justify-center active:scale-[0.98]">
+                      <Coffee className="w-5 h-5 mr-2" /> พักแป๊บ
+                    </button>
+                    <button onClick={promptEndWork} className="flex-1 bg-rose-100 text-rose-700 font-bold py-3 rounded-xl hover:bg-rose-200 transition flex items-center justify-center active:scale-[0.98]">
+                      <StopCircle className="w-5 h-5 mr-2" /> จบงาน
+                    </button>
+                  </div>
+                )}
+
+                {workStatus === 'on_break' && (
+                  <div className="flex space-x-3">
+                    <button onClick={handleResumeWork} className="flex-1 bg-green-100 text-green-700 font-bold py-3 rounded-xl hover:bg-green-200 transition flex items-center justify-center active:scale-[0.98]">
+                      <Play className="w-5 h-5 mr-2" fill="currentColor" /> ลุยต่อ
+                    </button>
+                    <button onClick={promptEndWork} className="flex-1 bg-rose-100 text-rose-700 font-bold py-3 rounded-xl hover:bg-rose-200 transition flex items-center justify-center active:scale-[0.98]">
+                      <StopCircle className="w-5 h-5 mr-2" /> จบงาน
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* การ์ดสรุปยอดรวม */}
               <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-5 text-white shadow-lg">
                 <div className="flex justify-between items-center mb-1">
-                  <h2 className="text-blue-100 text-sm font-medium">กำไรสุทธิ (บาท)</h2>
+                  <h2 className="text-blue-100 text-sm font-medium">กำไรสุทธิทั้งหมด (บาท)</h2>
                   {isLoading && <span className="text-xs text-blue-200 animate-pulse">กำลังซิงค์...</span>}
                 </div>
                 <div className="text-4xl font-bold tracking-tight">
@@ -499,11 +593,13 @@
           return (
             <div className="min-h-screen bg-gray-50 font-sans pb-20">
               {/* Header */}
-              <header className="bg-white px-5 py-4 shadow-sm sticky top-0 z-10 flex items-center">
-                <div className="bg-indigo-600 p-2 rounded-lg mr-3">
-                  <Wallet className="w-6 h-6 text-white" />
+              <header className="bg-white px-5 py-4 shadow-sm sticky top-0 z-10 flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="bg-indigo-600 p-2 rounded-lg mr-3">
+                    <Wallet className="w-6 h-6 text-white" />
+                  </div>
+                  <h1 className="text-xl font-bold text-gray-800">Rider Pocket</h1>
                 </div>
-                <h1 className="text-xl font-bold text-gray-800">Rider Pocket</h1>
               </header>
 
               {/* Main Content */}
@@ -541,6 +637,49 @@
                   </button>
                 </div>
               </nav>
+
+              {/* Modal (หน้าต่างแจ้งเตือนต่างๆ) */}
+              {modalConfig.isOpen && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 backdrop-blur-sm">
+                  <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
+                    
+                    {/* Modal: คำอวยพรเริ่มงาน */}
+                    {modalConfig.type === 'greeting' && (
+                      <div className="text-center">
+                        <div className="bg-gradient-to-br from-green-400 to-emerald-500 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-green-200">
+                          <Sun className="w-10 h-10" />
+                        </div>
+                        <h3 className="text-2xl font-bold text-gray-800 mb-2">อรุณสวัสดิ์ไรเดอร์!</h3>
+                        <p className="text-gray-600 mb-8 text-lg">{currentGreeting}</p>
+                        <button onClick={closeModal} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-700 shadow-md active:scale-[0.98] transition">
+                          ลุยเลย! 🛵💨
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Modal: ยืนยันจบงาน */}
+                    {modalConfig.type === 'end_confirm' && (
+                      <div className="text-center">
+                        <div className="bg-gradient-to-br from-rose-400 to-red-500 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-rose-200">
+                          <CheckCircle2 className="w-10 h-10" />
+                        </div>
+                        <h3 className="text-2xl font-bold text-gray-800 mb-2">จบงานวันนี้?</h3>
+                        <p className="text-gray-600 mb-8">คุณวิ่งงานมาเหนื่อยแล้ว ต้องการจบงานเพื่อพักผ่อนใช่ไหมครับ?</p>
+                        <div className="flex space-x-3">
+                          <button onClick={closeModal} className="flex-1 bg-gray-100 text-gray-700 font-bold py-4 rounded-xl hover:bg-gray-200 active:scale-[0.98] transition">
+                            ยังก่อน
+                          </button>
+                          <button onClick={handleEndWork} className="flex-1 bg-rose-600 text-white font-bold py-4 rounded-xl hover:bg-rose-700 shadow-md active:scale-[0.98] transition">
+                            ใช่, จบงานเลย
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                </div>
+              )}
+
             </div>
           );
         }
@@ -551,5 +690,3 @@
     </script>
 </body>
 </html>
-
-
