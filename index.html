@@ -39,7 +39,7 @@
         import { 
           Wallet, TrendingUp, TrendingDown, PlusCircle, List as ListIcon, 
           Home, Trash2, Calendar, DollarSign, Bike, Coffee, Wrench, Wifi, MoreHorizontal, Clock,
-          Play, StopCircle, Sun, CheckCircle2
+          Play, StopCircle, Sun, CheckCircle2, Receipt
         } from 'https://esm.sh/lucide-react@0.292.0';
 
         // นำเข้า Firebase SDK
@@ -178,16 +178,42 @@
             return () => unsubscribe(); 
           }, [user]);
 
-          // คำนวณสรุปยอด
+          // คำนวณสรุปยอดทั้งหมด (สำหรับหน้าภาพรวม)
           const summary = useMemo(() => {
             let totalIncome = 0;
             let totalExpense = 0;
             let totalTrips = 0;
             const platformTotals = {};
 
-            // เพื่อให้แม่นยำขึ้น เราสามารถกรองข้อมูลเฉพาะของ 'วันนี้' ได้ที่นี่ในอนาคต
-            // แต่ตอนนี้ใช้รวมทั้งหมดก่อนตามโค้ดเดิม
             records.forEach(record => {
+              const amt = parseFloat(record.amount);
+              if (record.type === 'income') {
+                totalIncome += amt;
+                totalTrips += 1;
+                platformTotals[record.platform] = (platformTotals[record.platform] || 0) + amt;
+              } else {
+                totalExpense += amt;
+              }
+            });
+
+            return {
+              totalIncome,
+              totalExpense,
+              totalTrips,
+              net: totalIncome - totalExpense,
+              platformTotals
+            };
+          }, [records]);
+
+          // คำนวณสรุปยอด "เฉพาะวันนี้" (สำหรับตอนกดจบงาน)
+          const todaySummary = useMemo(() => {
+            const todayStr = new Date().toISOString().split('T')[0];
+            let totalIncome = 0;
+            let totalExpense = 0;
+            let totalTrips = 0;
+            const platformTotals = {};
+
+            records.filter(r => r.date === todayStr).forEach(record => {
               const amt = parseFloat(record.amount);
               if (record.type === 'income') {
                 totalIncome += amt;
@@ -267,8 +293,8 @@
           };
 
           const handleEndWork = () => {
-            setWorkStatus('idle');
-            setModalConfig({ isOpen: false, type: null });
+            setWorkStatus('idle'); // เปลี่ยนสถานะเป็นว่าง
+            setModalConfig({ isOpen: true, type: 'end_summary' }); // เปิดหน้าสรุปยอด
           };
 
           const closeModal = () => {
@@ -391,152 +417,171 @@
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">บันทึกงาน / รายจ่าย</h2>
               
-              {/* ตัวสลับ รายรับ/รายจ่าย */}
-              <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
-                <button 
-                  onClick={() => setFormType('income')}
-                  className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-                    formType === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'
-                  }`}
-                >
-                  + ค่ารอบ (รายรับ)
-                </button>
-                <button 
-                  onClick={() => setFormType('expense')}
-                  className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-                    formType === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'
-                  }`}
-                >
-                  - รายจ่าย
-                </button>
-              </div>
-
-              <form onSubmit={handleSave} className="space-y-4">
-                {/* จำนวนเงิน */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {formType === 'income' ? 'ค่ารอบที่ได้ + ทิป (บาท)' : 'จำนวนเงิน (บาท)'}
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <DollarSign className="h-5 w-5 text-gray-400" />
-                    </div>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      pattern="[0-9]*"
-                      required
-                      min="1"
-                      step="0.01"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      className="block w-full pl-10 pr-3 py-4 border-2 border-indigo-100 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-2xl font-bold text-gray-800"
-                      placeholder="0.00"
-                    />
+              {/* เช็คสถานะการทำงาน: ถ้ายังไม่เริ่มงาน ไม่ให้บันทึก */}
+              {workStatus === 'idle' ? (
+                <div className="text-center py-8">
+                  <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <StopCircle className="w-10 h-10 text-gray-400" />
                   </div>
+                  <h3 className="text-lg font-bold text-gray-700 mb-2">คุณยังไม่ได้เริ่มงาน</h3>
+                  <p className="text-gray-500 mb-6 text-sm">กรุณากด "เริ่มงานวันนี้" ที่หน้าภาพรวมก่อน<br/>เพื่อเริ่มบันทึกรายรับ-รายจ่ายครับ</p>
+                  <button
+                    onClick={() => setActiveTab('dashboard')}
+                    className="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-indigo-700 transition active:scale-[0.98]"
+                  >
+                    กลับไปหน้าภาพรวม
+                  </button>
                 </div>
-
-                {/* เลือกค่าย หรือ หมวดหมู่ */}
-                {formType === 'income' ? (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">วิ่งค่ายไหน?</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {Object.keys(PLATFORMS).map(plat => (
-                        <button
-                          key={plat}
-                          type="button"
-                          onClick={() => setPlatform(plat)}
-                          className={`py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
-                            platform === plat 
-                              ? `${PLATFORMS[plat].textColor} border-${PLATFORMS[plat].textColor.split('-')[1]}-500 bg-${PLATFORMS[plat].textColor.split('-')[1]}-50 shadow-sm` 
-                              : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                          }`}
-                        >
-                          {plat}
-                        </button>
-                      ))}
-                    </div>
+              ) : (
+                <>
+                  {/* ตัวสลับ รายรับ/รายจ่าย */}
+                  <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
+                    <button 
+                      onClick={() => setFormType('income')}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
+                        formType === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'
+                      }`}
+                    >
+                      + ค่ารอบ (รายรับ)
+                    </button>
+                    <button 
+                      onClick={() => setFormType('expense')}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
+                        formType === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'
+                      }`}
+                    >
+                      - รายจ่าย
+                    </button>
                   </div>
-                ) : (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">หมวดหมู่รายจ่าย</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {Object.entries(EXPENSE_CATEGORIES).map(([catName, catData]) => {
-                        const Icon = catData.icon;
-                        return (
-                          <button
-                            key={catName}
-                            type="button"
-                            onClick={() => setCategory(catName)}
-                            className={`flex items-center justify-center py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
-                              category === catName 
-                                ? `${catData.color} border-current bg-gray-50 shadow-sm` 
-                                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}
-                          >
-                            <Icon className="w-4 h-4 mr-2" /> {catName}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
 
-                {/* วันที่ และ เวลา */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Calendar className="h-4 w-4 text-gray-400" />
+                  <form onSubmit={handleSave} className="space-y-4">
+                    {/* จำนวนเงิน */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        {formType === 'income' ? 'ค่ารอบที่ได้ + ทิป (บาท)' : 'จำนวนเงิน (บาท)'}
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <DollarSign className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          pattern="[0-9]*"
+                          required
+                          min="1"
+                          step="0.01"
+                          value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          className="block w-full pl-10 pr-3 py-4 border-2 border-indigo-100 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-2xl font-bold text-gray-800"
+                          placeholder="0.00"
+                        />
                       </div>
+                    </div>
+
+                    {/* เลือกค่าย หรือ หมวดหมู่ */}
+                    {formType === 'income' ? (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">วิ่งค่ายไหน?</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {Object.keys(PLATFORMS).map(plat => (
+                            <button
+                              key={plat}
+                              type="button"
+                              onClick={() => setPlatform(plat)}
+                              className={`py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
+                                platform === plat 
+                                  ? `${PLATFORMS[plat].textColor} border-${PLATFORMS[plat].textColor.split('-')[1]}-500 bg-${PLATFORMS[plat].textColor.split('-')[1]}-50 shadow-sm` 
+                                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              {plat}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">หมวดหมู่รายจ่าย</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {Object.entries(EXPENSE_CATEGORIES).map(([catName, catData]) => {
+                            const Icon = catData.icon;
+                            return (
+                              <button
+                                key={catName}
+                                type="button"
+                                onClick={() => setCategory(catName)}
+                                className={`flex items-center justify-center py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
+                                  category === catName 
+                                    ? `${catData.color} border-current bg-gray-50 shadow-sm` 
+                                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                                }`}
+                              >
+                                <Icon className="w-4 h-4 mr-2" /> {catName}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* วันที่ และ เวลา */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Calendar className="h-4 w-4 text-gray-400" />
+                          </div>
+                          <input
+                            type="date"
+                            required
+                            value={date}
+                            onChange={(e) => setDate(e.target.value)}
+                            className="block w-full pl-9 pr-2 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">เวลา</label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Clock className="h-4 w-4 text-gray-400" />
+                          </div>
+                          <input
+                            type="time"
+                            required
+                            value={time}
+                            onChange={(e) => setTime(e.target.value)}
+                            className="block w-full pl-9 pr-2 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* หมายเหตุ */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ (ถ้ามี)</label>
                       <input
-                        type="date"
-                        required
-                        value={date}
-                        onChange={(e) => setDate(e.target.value)}
-                        className="block w-full pl-9 pr-2 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                        type="text"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        className="block w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder={formType === 'income' ? "เช่น ลูกค้าให้ทิป, รหัสงาน..." : "เช่น ปะยาง, ข้าวมันไก่..."}
                       />
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">เวลา</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Clock className="h-4 w-4 text-gray-400" />
-                      </div>
-                      <input
-                        type="time"
-                        required
-                        value={time}
-                        onChange={(e) => setTime(e.target.value)}
-                        className="block w-full pl-9 pr-2 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-                      />
-                    </div>
-                  </div>
-                </div>
 
-                {/* หมายเหตุ */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ (ถ้ามี)</label>
-                  <input
-                    type="text"
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    className="block w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder={formType === 'income' ? "เช่น ลูกค้าให้ทิป, รหัสงาน..." : "เช่น ปะยาง, ข้าวมันไก่..."}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className={`w-full py-4 rounded-xl text-white font-bold text-lg shadow-md transition-all active:scale-[0.98] ${
-                    formType === 'income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
-                  }`}
-                >
-                  บันทึก{formType === 'income' ? 'ค่ารอบ' : 'รายจ่าย'}
-                </button>
-              </form>
+                    <button
+                      type="submit"
+                      className={`w-full py-4 rounded-xl text-white font-bold text-lg shadow-md transition-all active:scale-[0.98] ${
+                        formType === 'income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                      }`}
+                    >
+                      บันทึก{formType === 'income' ? 'ค่ารอบ' : 'รายจ่าย'}
+                    </button>
+                  </form>
+                </>
+              )}
             </div>
           );
 
@@ -664,7 +709,7 @@
                           <CheckCircle2 className="w-10 h-10" />
                         </div>
                         <h3 className="text-2xl font-bold text-gray-800 mb-2">จบงานวันนี้?</h3>
-                        <p className="text-gray-600 mb-8">คุณวิ่งงานมาเหนื่อยแล้ว ต้องการจบงานเพื่อพักผ่อนใช่ไหมครับ?</p>
+                        <p className="text-gray-600 mb-8">คุณวิ่งงานมาเหนื่อยแล้ว ต้องการจบงานเพื่อดูสรุปยอดใช่ไหมครับ?</p>
                         <div className="flex space-x-3">
                           <button onClick={closeModal} className="flex-1 bg-gray-100 text-gray-700 font-bold py-4 rounded-xl hover:bg-gray-200 active:scale-[0.98] transition">
                             ยังก่อน
@@ -673,6 +718,61 @@
                             ใช่, จบงานเลย
                           </button>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Modal: สรุปยอดหลังจบงาน */}
+                    {modalConfig.type === 'end_summary' && (
+                      <div className="text-center">
+                        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-indigo-200">
+                          <Receipt className="w-10 h-10" />
+                        </div>
+                        <h3 className="text-2xl font-bold text-gray-800 mb-2">สรุปยอดวันนี้</h3>
+                        <p className="text-gray-600 mb-5">เก่งมากครับ! พักผ่อนให้เต็มที่นะ 🎉</p>
+
+                        {/* กล่องรายละเอียดสรุปยอด */}
+                        <div className="bg-gray-50 rounded-xl p-4 mb-4 text-left space-y-3">
+                          <div className="flex justify-between items-center border-b border-gray-200 pb-2">
+                            <span className="text-gray-600">วิ่งไปทั้งหมด</span>
+                            <span className="font-bold text-gray-800">{todaySummary.totalTrips} รอบ</span>
+                          </div>
+                          <div className="flex justify-between items-center border-b border-gray-200 pb-2">
+                            <span className="text-gray-600">รายรับรวม</span>
+                            <span className="font-bold text-green-600">฿{todaySummary.totalIncome.toLocaleString('th-TH')}</span>
+                          </div>
+                          <div className="flex justify-between items-center border-b border-gray-200 pb-2">
+                            <span className="text-gray-600">รายจ่ายรวม</span>
+                            <span className="font-bold text-red-600">฿{todaySummary.totalExpense.toLocaleString('th-TH')}</span>
+                          </div>
+                          <div className="flex justify-between items-center pt-1">
+                            <span className="text-gray-800 font-bold">กำไรสุทธิ</span>
+                            <span className="font-bold text-indigo-600 text-xl">฿{todaySummary.net.toLocaleString('th-TH')}</span>
+                          </div>
+                        </div>
+
+                        {/* กล่องแยกยอดตามค่าย (แสดงก็ต่อเมื่อมีข้อมูล) */}
+                        {Object.keys(todaySummary.platformTotals).length > 0 && (
+                          <div className="bg-white border border-gray-100 rounded-xl p-4 mb-6 text-left">
+                            <h4 className="text-sm font-bold text-gray-700 mb-3">แยกตามค่ายที่วิ่งวันนี้</h4>
+                            <div className="space-y-2">
+                              {Object.entries(todaySummary.platformTotals)
+                                .sort(([,a], [,b]) => b - a)
+                                .map(([plat, val]) => (
+                                <div key={plat} className="flex justify-between text-sm">
+                                  <span className="text-gray-600 flex items-center">
+                                    <span className={`w-2 h-2 rounded-full mr-2 ${PLATFORMS[plat]?.color || 'bg-gray-500'}`}></span>
+                                    {plat}
+                                  </span>
+                                  <span className="font-semibold text-gray-800">฿{val.toLocaleString('th-TH')}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <button onClick={closeModal} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-700 shadow-md active:scale-[0.98] transition">
+                          ปิดหน้าต่าง
+                        </button>
                       </div>
                     )}
 
