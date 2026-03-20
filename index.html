@@ -14,6 +14,13 @@
     <!-- นำเข้า Tailwind CSS เพื่อจัดการความสวยงาม -->
     <script src="https://cdn.tailwindcss.com"></script>
     
+    <!-- ตั้งค่า Tailwind ให้รองรับ Dark Mode ผ่าน class -->
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+      }
+    </script>
+    
     <!-- ปรับแต่งพฤติกรรมบนมือถือเพิ่มเติม -->
     <style>
         /* จัดการขอบจอด้านล่างสำหรับ iPhone/Android รุ่นใหม่ */
@@ -22,12 +29,15 @@
         body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
         /* ป้องกันการซูมหน้าจอเวลาพิมพ์บน iPhone */
         input[type="number"], input[type="date"], input[type="time"], input[type="text"] { font-size: 16px !important; }
+        /* ซ่อน Scrollbar แต่ยังเลื่อนได้ */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 
     <!-- นำเข้า Babel เพื่อแปลภาษา React (JSX) ให้เบราว์เซอร์เข้าใจ -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
     <!-- จุดที่ React จะนำแอปมาแสดงผล -->
     <div id="root"></div>
 
@@ -39,13 +49,19 @@
         import { 
           Wallet, TrendingUp, TrendingDown, PlusCircle, List as ListIcon, 
           Home, Trash2, Calendar, DollarSign, Bike, Coffee, Wrench, Wifi, MoreHorizontal, Clock,
-          Play, StopCircle, Sun, CheckCircle2, Receipt
+          Play, StopCircle, Sun, CheckCircle2, Receipt, CalendarDays, ChevronLeft, ChevronRight, Moon
         } from 'https://esm.sh/lucide-react@0.292.0';
 
         // นำเข้า Firebase SDK
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ฟังก์ชันช่วยจัดการเรื่องเวลาของไทย (ป้องกันเวลาเคลื่อนตอนเที่ยงคืน)
+        const getLocalISODate = (date = new Date()) => {
+          const offset = date.getTimezoneOffset() * 60000;
+          return new Date(date.getTime() - offset).toISOString().split('T')[0];
+        };
 
         // ข้อมูลแพลตฟอร์มต่างๆ และสี
         const PLATFORMS = {
@@ -98,16 +114,22 @@
         const db = getFirestore(app);
 
         function App() {
-          const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, add, history
+          const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, calendar, add, history
           const [records, setRecords] = useState([]);
           const [isLoading, setIsLoading] = useState(true);
           const [connectionError, setConnectionError] = useState('');
           const [user, setUser] = useState(null);
           
-          // Work Status State ('idle', 'working', 'on_break') ดึงค่าจาก Local Storage ให้จำค่าไว้
+          // Dark Mode State
+          const [isDarkMode, setIsDarkMode] = useState(() => {
+            const saved = localStorage.getItem('riderDarkMode');
+            return saved === 'true';
+          });
+
+          // Work Status State ('idle', 'working', 'on_break')
           const [workStatus, setWorkStatus] = useState(() => localStorage.getItem('riderWorkStatus') || 'idle');
           
-          // Modal State สำหรับแสดงคำอวยพรและยืนยันจบงาน
+          // Modal State
           const [modalConfig, setModalConfig] = useState({ isOpen: false, type: null });
           const [currentGreeting, setCurrentGreeting] = useState('');
           
@@ -117,15 +139,29 @@
           const [platform, setPlatform] = useState('Grab');
           const [category, setCategory] = useState('ค่าน้ำมัน');
           const [note, setNote] = useState('');
-          const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+          const [date, setDate] = useState(getLocalISODate());
           const [time, setTime] = useState(new Date().toTimeString().split(' ')[0].substring(0, 5));
+
+          // Calendar State
+          const [calendarMonth, setCalendarMonth] = useState(new Date());
+          const [selectedCalDate, setSelectedCalDate] = useState(getLocalISODate());
+
+          // จัดการการเปิด-ปิด Dark Mode และเซฟลง Local Storage
+          useEffect(() => {
+            if (isDarkMode) {
+              document.documentElement.classList.add('dark');
+            } else {
+              document.documentElement.classList.remove('dark');
+            }
+            localStorage.setItem('riderDarkMode', isDarkMode);
+          }, [isDarkMode]);
 
           // อัปเดต Local Storage ทุกครั้งที่ Work Status เปลี่ยนแปลง
           useEffect(() => {
             localStorage.setItem('riderWorkStatus', workStatus);
           }, [workStatus]);
 
-          // 1. จัดการระบบล็อกอิน (แบบไม่ระบุตัวตน - Anonymous) เพื่อให้มีสิทธิ์บันทึกข้อมูล
+          // 1. จัดการระบบล็อกอิน
           useEffect(() => {
             const initAuth = async () => {
               try {
@@ -160,7 +196,6 @@
                 data.push({ id: doc.id, ...doc.data() });
               });
               
-              // เรียงวันที่และเวลา จากใหม่ไปเก่า
               data.sort((a, b) => {
                 const dateA = new Date(a.date + 'T' + (a.time || '00:00'));
                 const dateB = new Date(b.date + 'T' + (b.time || '00:00'));
@@ -178,7 +213,7 @@
             return () => unsubscribe(); 
           }, [user]);
 
-          // คำนวณสรุปยอดทั้งหมด (สำหรับหน้าภาพรวม)
+          // คำนวณสรุปยอดทั้งหมด
           const summary = useMemo(() => {
             let totalIncome = 0;
             let totalExpense = 0;
@@ -205,35 +240,34 @@
             };
           }, [records]);
 
-          // คำนวณสรุปยอด "เฉพาะวันนี้" (สำหรับตอนกดจบงาน)
-          const todaySummary = useMemo(() => {
-            const todayStr = new Date().toISOString().split('T')[0];
-            let totalIncome = 0;
-            let totalExpense = 0;
-            let totalTrips = 0;
-            const platformTotals = {};
-
-            records.filter(r => r.date === todayStr).forEach(record => {
-              const amt = parseFloat(record.amount);
-              if (record.type === 'income') {
-                totalIncome += amt;
-                totalTrips += 1;
-                platformTotals[record.platform] = (platformTotals[record.platform] || 0) + amt;
-              } else {
-                totalExpense += amt;
+          // จัดกลุ่มข้อมูลรายวันสำหรับปฏิทิน
+          const dailyData = useMemo(() => {
+            const grouped = {};
+            records.forEach(r => {
+              if (!grouped[r.date]) {
+                grouped[r.date] = { income: 0, expense: 0, net: 0, trips: 0, records: [] };
               }
+              const amt = parseFloat(r.amount);
+              if (r.type === 'income') {
+                grouped[r.date].income += amt;
+                grouped[r.date].net += amt;
+                grouped[r.date].trips += 1;
+              } else {
+                grouped[r.date].expense += amt;
+                grouped[r.date].net -= amt;
+              }
+              grouped[r.date].records.push(r);
             });
-
-            return {
-              totalIncome,
-              totalExpense,
-              totalTrips,
-              net: totalIncome - totalExpense,
-              platformTotals
-            };
+            return grouped;
           }, [records]);
 
-          // 3. จัดการการบันทึกข้อมูลลง Firebase
+          // คำนวณสรุปยอด "เฉพาะวันนี้"
+          const todaySummary = useMemo(() => {
+            const todayStr = getLocalISODate();
+            return dailyData[todayStr] || { income: 0, expense: 0, net: 0, trips: 0, records: [] };
+          }, [dailyData]);
+
+          // 3. จัดการการบันทึกข้อมูล
           const handleSave = async (e) => {
             e.preventDefault();
             if (!amount || isNaN(amount) || amount <= 0 || !user) return;
@@ -262,7 +296,7 @@
             }
           };
 
-          // 4. ลบข้อมูลจาก Firebase
+          // 4. ลบข้อมูล
           const deleteRecord = async (id) => {
             if (!user) return;
             try {
@@ -272,40 +306,30 @@
             }
           };
 
-          // --- ฟังก์ชันจัดการสถานะการทำงาน ---
+          // ฟังก์ชันจัดการสถานะการทำงาน
           const handleStartWork = () => {
             const randomMsg = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
             setCurrentGreeting(randomMsg);
             setWorkStatus('working');
+            setDate(getLocalISODate()); 
             setModalConfig({ isOpen: true, type: 'greeting' });
           };
 
-          const handleTakeBreak = () => {
-            setWorkStatus('on_break');
-          };
-
-          const handleResumeWork = () => {
-            setWorkStatus('working');
-          };
-
-          const promptEndWork = () => {
-            setModalConfig({ isOpen: true, type: 'end_confirm' });
-          };
-
+          const handleTakeBreak = () => setWorkStatus('on_break');
+          const handleResumeWork = () => setWorkStatus('working');
+          const promptEndWork = () => setModalConfig({ isOpen: true, type: 'end_confirm' });
+          
           const handleEndWork = () => {
-            setWorkStatus('idle'); // เปลี่ยนสถานะเป็นว่าง
-            setModalConfig({ isOpen: true, type: 'end_summary' }); // เปิดหน้าสรุปยอด
+            setWorkStatus('idle'); 
+            setModalConfig({ isOpen: true, type: 'end_summary' }); 
           };
 
-          const closeModal = () => {
-            setModalConfig({ isOpen: false, type: null });
-          };
+          const closeModal = () => setModalConfig({ isOpen: false, type: null });
 
-          // --- ส่วนประกอบ UI ---
+          // --- ส่วนประกอบ UI: Dashboard ---
           const renderDashboard = () => (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
               
-              {/* ส่วนแสดง Error (ถ้ามี) */}
               {connectionError && (
                 <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm border border-red-200">
                   ⚠️ {connectionError}
@@ -313,13 +337,13 @@
               )}
 
               {/* วิดเจ็ต: สถานะการทำงาน */}
-              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-gray-800 font-semibold flex items-center">
-                    <Clock className="w-5 h-5 mr-2 text-indigo-500" /> สถานะงานวันนี้
+                  <h3 className="text-gray-800 dark:text-white font-semibold flex items-center">
+                    <Clock className="w-5 h-5 mr-2 text-indigo-500 dark:text-indigo-400" /> สถานะงานวันนี้
                   </h3>
-                  {workStatus === 'working' && <span className="flex items-center text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded-full"><span className="w-2 h-2 rounded-full bg-green-500 mr-1 animate-pulse"></span> กำลังวิ่งงาน</span>}
-                  {workStatus === 'on_break' && <span className="flex items-center text-xs font-bold text-amber-600 bg-amber-100 px-2 py-1 rounded-full"><Coffee className="w-3 h-3 mr-1" /> พักผ่อน</span>}
+                  {workStatus === 'working' && <span className="flex items-center text-xs font-bold text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/40 px-2 py-1 rounded-full"><span className="w-2 h-2 rounded-full bg-green-500 mr-1 animate-pulse"></span> กำลังวิ่งงาน</span>}
+                  {workStatus === 'on_break' && <span className="flex items-center text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/40 px-2 py-1 rounded-full"><Coffee className="w-3 h-3 mr-1" /> พักผ่อน</span>}
                 </div>
 
                 {workStatus === 'idle' && (
@@ -330,10 +354,10 @@
 
                 {workStatus === 'working' && (
                   <div className="flex space-x-3">
-                    <button onClick={handleTakeBreak} className="flex-1 bg-amber-100 text-amber-700 font-bold py-3 rounded-xl hover:bg-amber-200 transition flex items-center justify-center active:scale-[0.98]">
+                    <button onClick={handleTakeBreak} className="flex-1 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 font-bold py-3 rounded-xl hover:bg-amber-200 dark:hover:bg-amber-900/60 transition flex items-center justify-center active:scale-[0.98]">
                       <Coffee className="w-5 h-5 mr-2" /> พักแป๊บ
                     </button>
-                    <button onClick={promptEndWork} className="flex-1 bg-rose-100 text-rose-700 font-bold py-3 rounded-xl hover:bg-rose-200 transition flex items-center justify-center active:scale-[0.98]">
+                    <button onClick={promptEndWork} className="flex-1 bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400 font-bold py-3 rounded-xl hover:bg-rose-200 dark:hover:bg-rose-900/60 transition flex items-center justify-center active:scale-[0.98]">
                       <StopCircle className="w-5 h-5 mr-2" /> จบงาน
                     </button>
                   </div>
@@ -341,10 +365,10 @@
 
                 {workStatus === 'on_break' && (
                   <div className="flex space-x-3">
-                    <button onClick={handleResumeWork} className="flex-1 bg-green-100 text-green-700 font-bold py-3 rounded-xl hover:bg-green-200 transition flex items-center justify-center active:scale-[0.98]">
+                    <button onClick={handleResumeWork} className="flex-1 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 font-bold py-3 rounded-xl hover:bg-green-200 dark:hover:bg-green-900/60 transition flex items-center justify-center active:scale-[0.98]">
                       <Play className="w-5 h-5 mr-2" fill="currentColor" /> ลุยต่อ
                     </button>
-                    <button onClick={promptEndWork} className="flex-1 bg-rose-100 text-rose-700 font-bold py-3 rounded-xl hover:bg-rose-200 transition flex items-center justify-center active:scale-[0.98]">
+                    <button onClick={promptEndWork} className="flex-1 bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400 font-bold py-3 rounded-xl hover:bg-rose-200 dark:hover:bg-rose-900/60 transition flex items-center justify-center active:scale-[0.98]">
                       <StopCircle className="w-5 h-5 mr-2" /> จบงาน
                     </button>
                   </div>
@@ -384,10 +408,10 @@
               </div>
 
               {/* สรุปรายได้แยกตามค่าย */}
-              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                <h3 className="text-gray-800 font-semibold mb-4 flex items-center">
-                  <Wallet className="w-5 h-5 mr-2 text-indigo-500" /> 
-                  รายได้แยกตามค่าย
+              <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+                <h3 className="text-gray-800 dark:text-white font-semibold mb-4 flex items-center">
+                  <Wallet className="w-5 h-5 mr-2 text-indigo-500 dark:text-indigo-400" /> 
+                  รายได้แยกตามค่าย (ทั้งหมด)
                 </h3>
                 
                 {Object.keys(summary.platformTotals).length > 0 ? (
@@ -398,9 +422,9 @@
                       <div key={plat} className="flex items-center justify-between">
                         <div className="flex items-center">
                           <div className={`w-3 h-3 rounded-full mr-3 ${PLATFORMS[plat]?.color || 'bg-gray-500'}`}></div>
-                          <span className="text-gray-700 font-medium">{plat}</span>
+                          <span className="text-gray-700 dark:text-gray-300 font-medium">{plat}</span>
                         </div>
-                        <div className="font-semibold text-gray-900">฿{val.toLocaleString('th-TH')}</div>
+                        <div className="font-semibold text-gray-900 dark:text-white">฿{val.toLocaleString('th-TH')}</div>
                       </div>
                     ))}
                   </div>
@@ -413,18 +437,144 @@
             </div>
           );
 
+          // --- ส่วนประกอบ UI: Calendar ---
+          const renderCalendar = () => {
+            const THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+            const THAI_DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+
+            const year = calendarMonth.getFullYear();
+            const month = calendarMonth.getMonth();
+            
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            
+            const prevMonth = () => setCalendarMonth(new Date(year, month - 1, 1));
+            const nextMonth = () => setCalendarMonth(new Date(year, month + 1, 1));
+
+            const days = [];
+            for (let i = 0; i < firstDay; i++) days.push(null);
+            for (let i = 1; i <= daysInMonth; i++) days.push(i);
+
+            const selData = dailyData[selectedCalDate] || { income: 0, expense: 0, net: 0, trips: 0, records: [] };
+            
+            const formatShortNet = (num) => {
+              if(num >= 10000) return (num/1000).toFixed(1) + 'k';
+              return num.toLocaleString('th-TH');
+            };
+
+            return (
+              <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                {/* ส่วนหัวปฏิทิน */}
+                <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+                  <div className="flex justify-between items-center mb-4">
+                    <button onClick={prevMonth} className="p-2 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-full transition"><ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" /></button>
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-white">
+                      {THAI_MONTHS[month]} {year + 543}
+                    </h2>
+                    <button onClick={nextMonth} className="p-2 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-full transition"><ChevronRight className="w-5 h-5 text-gray-600 dark:text-gray-300" /></button>
+                  </div>
+
+                  {/* ตารางปฏิทิน */}
+                  <div className="grid grid-cols-7 gap-1 text-center mb-2">
+                    {THAI_DAYS.map(d => <div key={d} className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 py-1">{d}</div>)}
+                    
+                    {days.map((day, idx) => {
+                      if (!day) return <div key={`empty-${idx}`} className="p-1"></div>;
+                      
+                      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const data = dailyData[dateStr];
+                      const isToday = dateStr === getLocalISODate();
+                      const isSelected = dateStr === selectedCalDate;
+                      
+                      return (
+                        <button
+                          key={dateStr}
+                          onClick={() => setSelectedCalDate(dateStr)}
+                          className={`flex flex-col items-center justify-start p-1 h-14 rounded-lg border transition-all ${
+                            isSelected ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/40 ring-1 ring-indigo-500' :
+                            isToday ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-50 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <span className={`text-xs ${isToday ? 'font-bold text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'}`}>{day}</span>
+                          {data && data.net !== 0 && (
+                            <span className={`text-[9px] font-bold mt-0.5 truncate w-full ${data.net >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                              {data.net > 0 ? '+' : ''}{formatShortNet(data.net)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* สรุปยอดของวันที่เลือก */}
+                <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+                  <h3 className="text-gray-800 dark:text-white font-semibold mb-4 flex items-center justify-between">
+                    <span className="flex items-center">
+                      <CalendarDays className="w-5 h-5 mr-2 text-indigo-500 dark:text-indigo-400" /> 
+                      สรุปยอดวันที่ {selectedCalDate.split('-')[2]}/{selectedCalDate.split('-')[1]}
+                    </span>
+                    <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full">{selData.trips} รอบ</span>
+                  </h3>
+
+                  <div className="grid grid-cols-3 gap-2 mb-5">
+                    <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3 text-center">
+                      <div className="text-[10px] text-green-600 dark:text-green-400 mb-1">รายรับ</div>
+                      <div className="text-sm font-bold text-green-700 dark:text-green-300">฿{selData.income.toLocaleString('th-TH')}</div>
+                    </div>
+                    <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-3 text-center">
+                      <div className="text-[10px] text-red-600 dark:text-red-400 mb-1">รายจ่าย</div>
+                      <div className="text-sm font-bold text-red-700 dark:text-red-300">฿{selData.expense.toLocaleString('th-TH')}</div>
+                    </div>
+                    <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-3 text-center border border-indigo-100 dark:border-indigo-800">
+                      <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold mb-1">กำไรสุทธิ</div>
+                      <div className="text-sm font-bold text-indigo-700 dark:text-indigo-300">฿{selData.net.toLocaleString('th-TH')}</div>
+                    </div>
+                  </div>
+
+                  {/* รายการของวันที่เลือก */}
+                  {selData.records.length > 0 ? (
+                    <div className="space-y-2 mt-4 max-h-[40vh] overflow-y-auto no-scrollbar pb-2">
+                      {selData.records.map(record => (
+                        <div key={record.id} className="flex items-center justify-between p-2.5 border border-gray-100 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                          <div className="flex items-center">
+                            <div className={`p-1.5 rounded-full mr-3 ${record.type === 'income' ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'}`}>
+                              {record.type === 'income' ? <Bike className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                            </div>
+                            <div>
+                              <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                {record.type === 'income' ? record.platform : record.category}
+                              </div>
+                              {record.time && <div className="text-[10px] text-gray-400 dark:text-gray-500">{record.time} น. {record.note && `• ${record.note}`}</div>}
+                            </div>
+                          </div>
+                          <span className={`text-sm font-bold ${record.type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {record.type === 'income' ? '+' : '-'}฿{record.amount.toLocaleString('th-TH')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center text-gray-400 dark:text-gray-500 py-6 text-sm">ไม่มีประวัติการบันทึกในวันนี้</div>
+                  )}
+                </div>
+              </div>
+            );
+          };
+
+          // --- ส่วนประกอบ UI: Add Record ---
           const renderAddRecord = () => (
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">บันทึกงาน / รายจ่าย</h2>
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 animate-in fade-in slide-in-from-bottom-2 duration-300 transition-colors">
+              <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-6 text-center">บันทึกงาน / รายจ่าย</h2>
               
               {/* เช็คสถานะการทำงาน: ถ้ายังไม่เริ่มงาน ไม่ให้บันทึก */}
               {workStatus === 'idle' ? (
                 <div className="text-center py-8">
-                  <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <StopCircle className="w-10 h-10 text-gray-400" />
+                  <div className="bg-gray-100 dark:bg-gray-700 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <StopCircle className="w-10 h-10 text-gray-400 dark:text-gray-500" />
                   </div>
-                  <h3 className="text-lg font-bold text-gray-700 mb-2">คุณยังไม่ได้เริ่มงาน</h3>
-                  <p className="text-gray-500 mb-6 text-sm">กรุณากด "เริ่มงานวันนี้" ที่หน้าภาพรวมก่อน<br/>เพื่อเริ่มบันทึกรายรับ-รายจ่ายครับ</p>
+                  <h3 className="text-lg font-bold text-gray-700 dark:text-gray-200 mb-2">คุณยังไม่ได้เริ่มงาน</h3>
+                  <p className="text-gray-500 dark:text-gray-400 mb-6 text-sm">กรุณากด "เริ่มงานวันนี้" ที่หน้าภาพรวมก่อน<br/>เพื่อเริ่มบันทึกรายรับ-รายจ่ายครับ</p>
                   <button
                     onClick={() => setActiveTab('dashboard')}
                     className="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-indigo-700 transition active:scale-[0.98]"
@@ -434,12 +584,11 @@
                 </div>
               ) : (
                 <>
-                  {/* ตัวสลับ รายรับ/รายจ่าย */}
-                  <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
+                  <div className="flex p-1 bg-gray-100 dark:bg-gray-700 rounded-xl mb-6 transition-colors">
                     <button 
                       onClick={() => setFormType('income')}
                       className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-                        formType === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'
+                        formType === 'income' ? 'bg-white dark:bg-gray-800 text-green-600 dark:text-green-400 shadow-sm' : 'text-gray-500 dark:text-gray-400'
                       }`}
                     >
                       + ค่ารอบ (รายรับ)
@@ -447,7 +596,7 @@
                     <button 
                       onClick={() => setFormType('expense')}
                       className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-                        formType === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'
+                        formType === 'expense' ? 'bg-white dark:bg-gray-800 text-red-600 dark:text-red-400 shadow-sm' : 'text-gray-500 dark:text-gray-400'
                       }`}
                     >
                       - รายจ่าย
@@ -455,14 +604,13 @@
                   </div>
 
                   <form onSubmit={handleSave} className="space-y-4">
-                    {/* จำนวนเงิน */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         {formType === 'income' ? 'ค่ารอบที่ได้ + ทิป (บาท)' : 'จำนวนเงิน (บาท)'}
                       </label>
                       <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <DollarSign className="h-5 w-5 text-gray-400" />
+                          <DollarSign className="h-5 w-5 text-gray-400 dark:text-gray-500" />
                         </div>
                         <input
                           type="number"
@@ -473,36 +621,39 @@
                           step="0.01"
                           value={amount}
                           onChange={(e) => setAmount(e.target.value)}
-                          className="block w-full pl-10 pr-3 py-4 border-2 border-indigo-100 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-2xl font-bold text-gray-800"
+                          className="block w-full pl-10 pr-3 py-4 border border-indigo-100 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-2xl font-bold"
                           placeholder="0.00"
                         />
                       </div>
                     </div>
 
-                    {/* เลือกค่าย หรือ หมวดหมู่ */}
                     {formType === 'income' ? (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">วิ่งค่ายไหน?</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วิ่งค่ายไหน?</label>
                         <div className="grid grid-cols-2 gap-2">
-                          {Object.keys(PLATFORMS).map(plat => (
-                            <button
-                              key={plat}
-                              type="button"
-                              onClick={() => setPlatform(plat)}
-                              className={`py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
-                                platform === plat 
-                                  ? `${PLATFORMS[plat].textColor} border-${PLATFORMS[plat].textColor.split('-')[1]}-500 bg-${PLATFORMS[plat].textColor.split('-')[1]}-50 shadow-sm` 
-                                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                              }`}
-                            >
-                              {plat}
-                            </button>
-                          ))}
+                          {Object.keys(PLATFORMS).map(plat => {
+                            const isSelected = platform === plat;
+                            const colorName = PLATFORMS[plat].textColor.split('-')[1];
+                            return (
+                              <button
+                                key={plat}
+                                type="button"
+                                onClick={() => setPlatform(plat)}
+                                className={`py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
+                                  isSelected 
+                                    ? `border-${colorName}-500 bg-${colorName}-50 dark:bg-${colorName}-900/30 text-${colorName}-600 dark:text-${colorName}-400 shadow-sm` 
+                                    : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                }`}
+                              >
+                                {plat}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     ) : (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">หมวดหมู่รายจ่าย</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">หมวดหมู่รายจ่าย</label>
                         <div className="grid grid-cols-2 gap-2">
                           {Object.entries(EXPENSE_CATEGORIES).map(([catName, catData]) => {
                             const Icon = catData.icon;
@@ -513,8 +664,8 @@
                                 onClick={() => setCategory(catName)}
                                 className={`flex items-center justify-center py-2 px-3 text-sm font-medium rounded-xl border transition-all ${
                                   category === catName 
-                                    ? `${catData.color} border-current bg-gray-50 shadow-sm` 
-                                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                                    ? `${catData.color} border-current bg-gray-50 dark:bg-gray-700 shadow-sm` 
+                                    : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
                                 }`}
                               >
                                 <Icon className="w-4 h-4 mr-2" /> {catName}
@@ -525,48 +676,46 @@
                       </div>
                     )}
 
-                    {/* วันที่ และ เวลา */}
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันที่</label>
                         <div className="relative">
                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Calendar className="h-4 w-4 text-gray-400" />
+                            <Calendar className="h-4 w-4 text-gray-400 dark:text-gray-500" />
                           </div>
                           <input
                             type="date"
                             required
                             value={date}
                             onChange={(e) => setDate(e.target.value)}
-                            className="block w-full pl-9 pr-2 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                            className="block w-full pl-9 pr-2 py-3 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                           />
                         </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">เวลา</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">เวลา</label>
                         <div className="relative">
                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Clock className="h-4 w-4 text-gray-400" />
+                            <Clock className="h-4 w-4 text-gray-400 dark:text-gray-500" />
                           </div>
                           <input
                             type="time"
                             required
                             value={time}
                             onChange={(e) => setTime(e.target.value)}
-                            className="block w-full pl-9 pr-2 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                            className="block w-full pl-9 pr-2 py-3 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                           />
                         </div>
                       </div>
                     </div>
 
-                    {/* หมายเหตุ */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ (ถ้ามี)</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">หมายเหตุ (ถ้ามี)</label>
                       <input
                         type="text"
                         value={note}
                         onChange={(e) => setNote(e.target.value)}
-                        className="block w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        className="block w-full px-4 py-3 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         placeholder={formType === 'income' ? "เช่น ลูกค้าให้ทิป, รหัสงาน..." : "เช่น ปะยาง, ข้าวมันไก่..."}
                       />
                     </div>
@@ -586,44 +735,44 @@
           );
 
           const renderHistory = () => (
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 min-h-[60vh] animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <h2 className="text-xl font-bold text-gray-800 mb-4">ประวัติการบันทึก</h2>
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 min-h-[60vh] animate-in fade-in slide-in-from-bottom-2 duration-300 transition-colors">
+              <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4">ประวัติทั้งหมด</h2>
               
               {isLoading && records.length === 0 ? (
-                <div className="text-center text-gray-400 py-10 flex flex-col items-center">
+                <div className="text-center text-gray-400 dark:text-gray-500 py-10 flex flex-col items-center">
                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mb-4"></div>
                    <p>กำลังดึงข้อมูลจาก Firebase...</p>
                 </div>
               ) : records.length === 0 ? (
-                <div className="text-center text-gray-400 py-10 flex flex-col items-center">
-                  <ListIcon className="w-12 h-12 mb-2 text-gray-300" />
+                <div className="text-center text-gray-400 dark:text-gray-500 py-10 flex flex-col items-center">
+                  <ListIcon className="w-12 h-12 mb-2 text-gray-300 dark:text-gray-600" />
                   <p>ยังไม่มีประวัติการบันทึก</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {records.map(record => (
-                    <div key={record.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors">
+                    <div key={record.id} className="flex items-center justify-between p-3 border border-gray-100 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                       <div className="flex items-center">
-                        <div className={`p-2 rounded-full mr-3 ${record.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                        <div className={`p-2 rounded-full mr-3 ${record.type === 'income' ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'}`}>
                           {record.type === 'income' ? <Bike className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
                         </div>
                         <div>
-                          <div className="font-semibold text-gray-800">
+                          <div className="font-semibold text-gray-800 dark:text-gray-200">
                             {record.type === 'income' ? `งาน ${record.platform}` : record.category}
                           </div>
-                          <div className="text-xs text-gray-500 flex items-center">
+                          <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center">
                             {record.date} {record.time ? `• ${record.time} น.` : ''} 
-                            {record.note && <span className="ml-1 text-gray-400 truncate max-w-[100px]">({record.note})</span>}
+                            {record.note && <span className="ml-1 text-gray-400 dark:text-gray-500 truncate max-w-[100px]">({record.note})</span>}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center">
-                        <span className={`font-bold mr-3 ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                        <span className={`font-bold mr-3 ${record.type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                           {record.type === 'income' ? '+' : '-'}฿{record.amount.toLocaleString('th-TH')}
                         </span>
                         <button 
                           onClick={() => deleteRecord(record.id)}
-                          className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                          className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -636,46 +785,64 @@
           );
 
           return (
-            <div className="min-h-screen bg-gray-50 font-sans pb-20">
+            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 font-sans pb-24 transition-colors duration-200">
               {/* Header */}
-              <header className="bg-white px-5 py-4 shadow-sm sticky top-0 z-10 flex items-center justify-between">
+              <header className="bg-white dark:bg-gray-800 px-5 py-4 shadow-sm sticky top-0 z-10 flex items-center justify-between transition-colors duration-200">
                 <div className="flex items-center">
                   <div className="bg-indigo-600 p-2 rounded-lg mr-3">
                     <Wallet className="w-6 h-6 text-white" />
                   </div>
-                  <h1 className="text-xl font-bold text-gray-800">Rider Pocket</h1>
+                  <h1 className="text-xl font-bold text-gray-800 dark:text-white">Rider Pocket</h1>
                 </div>
+                
+                {/* ปุ่มเปิด-ปิด Dark Mode */}
+                <button 
+                  onClick={() => setIsDarkMode(!isDarkMode)} 
+                  className="p-2 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+                  aria-label="Toggle Dark Mode"
+                >
+                  {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                </button>
               </header>
 
               {/* Main Content */}
               <main className="max-w-md mx-auto p-4">
                 {activeTab === 'dashboard' && renderDashboard()}
+                {activeTab === 'calendar' && renderCalendar()}
                 {activeTab === 'add' && renderAddRecord()}
                 {activeTab === 'history' && renderHistory()}
               </main>
 
               {/* Bottom Navigation */}
-              <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe">
-                <div className="max-w-md mx-auto flex justify-around p-2">
+              <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 pb-safe z-40 transition-colors duration-200">
+                <div className="max-w-md mx-auto flex justify-between px-2 py-2">
                   <button 
                     onClick={() => setActiveTab('dashboard')}
-                    className={`flex flex-col items-center p-2 w-20 rounded-xl transition-all ${activeTab === 'dashboard' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'}`}
+                    className={`flex flex-col items-center p-2 flex-1 rounded-xl transition-all ${activeTab === 'dashboard' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                   >
                     <Home className="w-6 h-6 mb-1" />
                     <span className="text-[10px] font-medium">ภาพรวม</span>
                   </button>
+
+                  <button 
+                    onClick={() => setActiveTab('calendar')}
+                    className={`flex flex-col items-center p-2 flex-1 rounded-xl transition-all ${activeTab === 'calendar' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                  >
+                    <CalendarDays className="w-6 h-6 mb-1" />
+                    <span className="text-[10px] font-medium">ปฏิทิน</span>
+                  </button>
                   
                   <button 
                     onClick={() => setActiveTab('add')}
-                    className={`flex flex-col items-center p-2 w-20 rounded-xl transition-all ${activeTab === 'add' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'}`}
+                    className={`flex flex-col items-center p-2 flex-1 rounded-xl transition-all ${activeTab === 'add' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                   >
                     <PlusCircle className="w-6 h-6 mb-1" />
-                    <span className="text-[10px] font-medium">บันทึกรอบ</span>
+                    <span className="text-[10px] font-medium">บันทึก</span>
                   </button>
                   
                   <button 
                     onClick={() => setActiveTab('history')}
-                    className={`flex flex-col items-center p-2 w-20 rounded-xl transition-all ${activeTab === 'history' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50'}`}
+                    className={`flex flex-col items-center p-2 flex-1 rounded-xl transition-all ${activeTab === 'history' ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                   >
                     <ListIcon className="w-6 h-6 mb-1" />
                     <span className="text-[10px] font-medium">ประวัติ</span>
@@ -686,16 +853,16 @@
               {/* Modal (หน้าต่างแจ้งเตือนต่างๆ) */}
               {modalConfig.isOpen && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 backdrop-blur-sm">
-                  <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
+                  <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200 transition-colors">
                     
                     {/* Modal: คำอวยพรเริ่มงาน */}
                     {modalConfig.type === 'greeting' && (
                       <div className="text-center">
-                        <div className="bg-gradient-to-br from-green-400 to-emerald-500 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-green-200">
+                        <div className="bg-gradient-to-br from-green-400 to-emerald-500 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-green-200 dark:shadow-none">
                           <Sun className="w-10 h-10" />
                         </div>
-                        <h3 className="text-2xl font-bold text-gray-800 mb-2">อรุณสวัสดิ์ไรเดอร์!</h3>
-                        <p className="text-gray-600 mb-8 text-lg">{currentGreeting}</p>
+                        <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">อรุณสวัสดิ์ไรเดอร์!</h3>
+                        <p className="text-gray-600 dark:text-gray-300 mb-8 text-lg">{currentGreeting}</p>
                         <button onClick={closeModal} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-700 shadow-md active:scale-[0.98] transition">
                           ลุยเลย! 🛵💨
                         </button>
@@ -705,13 +872,13 @@
                     {/* Modal: ยืนยันจบงาน */}
                     {modalConfig.type === 'end_confirm' && (
                       <div className="text-center">
-                        <div className="bg-gradient-to-br from-rose-400 to-red-500 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-rose-200">
+                        <div className="bg-gradient-to-br from-rose-400 to-red-500 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-rose-200 dark:shadow-none">
                           <CheckCircle2 className="w-10 h-10" />
                         </div>
-                        <h3 className="text-2xl font-bold text-gray-800 mb-2">จบงานวันนี้?</h3>
-                        <p className="text-gray-600 mb-8">คุณวิ่งงานมาเหนื่อยแล้ว ต้องการจบงานเพื่อดูสรุปยอดใช่ไหมครับ?</p>
+                        <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">จบงานวันนี้?</h3>
+                        <p className="text-gray-600 dark:text-gray-300 mb-8">คุณวิ่งงานมาเหนื่อยแล้ว ต้องการจบงานเพื่อดูสรุปยอดใช่ไหมครับ?</p>
                         <div className="flex space-x-3">
-                          <button onClick={closeModal} className="flex-1 bg-gray-100 text-gray-700 font-bold py-4 rounded-xl hover:bg-gray-200 active:scale-[0.98] transition">
+                          <button onClick={closeModal} className="flex-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold py-4 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 active:scale-[0.98] transition">
                             ยังก่อน
                           </button>
                           <button onClick={handleEndWork} className="flex-1 bg-rose-600 text-white font-bold py-4 rounded-xl hover:bg-rose-700 shadow-md active:scale-[0.98] transition">
@@ -724,51 +891,30 @@
                     {/* Modal: สรุปยอดหลังจบงาน */}
                     {modalConfig.type === 'end_summary' && (
                       <div className="text-center">
-                        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-indigo-200">
+                        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 text-white w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg shadow-indigo-200 dark:shadow-none">
                           <Receipt className="w-10 h-10" />
                         </div>
-                        <h3 className="text-2xl font-bold text-gray-800 mb-2">สรุปยอดวันนี้</h3>
-                        <p className="text-gray-600 mb-5">เก่งมากครับ! พักผ่อนให้เต็มที่นะ 🎉</p>
+                        <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">สรุปยอดวันนี้</h3>
+                        <p className="text-gray-600 dark:text-gray-300 mb-5">เก่งมากครับ! พักผ่อนให้เต็มที่นะ 🎉</p>
 
-                        {/* กล่องรายละเอียดสรุปยอด */}
-                        <div className="bg-gray-50 rounded-xl p-4 mb-4 text-left space-y-3">
-                          <div className="flex justify-between items-center border-b border-gray-200 pb-2">
-                            <span className="text-gray-600">วิ่งไปทั้งหมด</span>
-                            <span className="font-bold text-gray-800">{todaySummary.totalTrips} รอบ</span>
+                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-4 text-left space-y-3">
+                          <div className="flex justify-between items-center border-b border-gray-200 dark:border-gray-600 pb-2">
+                            <span className="text-gray-600 dark:text-gray-300">วิ่งไปทั้งหมด</span>
+                            <span className="font-bold text-gray-800 dark:text-white">{todaySummary.trips} รอบ</span>
                           </div>
-                          <div className="flex justify-between items-center border-b border-gray-200 pb-2">
-                            <span className="text-gray-600">รายรับรวม</span>
-                            <span className="font-bold text-green-600">฿{todaySummary.totalIncome.toLocaleString('th-TH')}</span>
+                          <div className="flex justify-between items-center border-b border-gray-200 dark:border-gray-600 pb-2">
+                            <span className="text-gray-600 dark:text-gray-300">รายรับรวม</span>
+                            <span className="font-bold text-green-600 dark:text-green-400">฿{todaySummary.income.toLocaleString('th-TH')}</span>
                           </div>
-                          <div className="flex justify-between items-center border-b border-gray-200 pb-2">
-                            <span className="text-gray-600">รายจ่ายรวม</span>
-                            <span className="font-bold text-red-600">฿{todaySummary.totalExpense.toLocaleString('th-TH')}</span>
+                          <div className="flex justify-between items-center border-b border-gray-200 dark:border-gray-600 pb-2">
+                            <span className="text-gray-600 dark:text-gray-300">รายจ่ายรวม</span>
+                            <span className="font-bold text-red-600 dark:text-red-400">฿{todaySummary.expense.toLocaleString('th-TH')}</span>
                           </div>
                           <div className="flex justify-between items-center pt-1">
-                            <span className="text-gray-800 font-bold">กำไรสุทธิ</span>
-                            <span className="font-bold text-indigo-600 text-xl">฿{todaySummary.net.toLocaleString('th-TH')}</span>
+                            <span className="text-gray-800 dark:text-white font-bold">กำไรสุทธิ</span>
+                            <span className="font-bold text-indigo-600 dark:text-indigo-400 text-xl">฿{todaySummary.net.toLocaleString('th-TH')}</span>
                           </div>
                         </div>
-
-                        {/* กล่องแยกยอดตามค่าย (แสดงก็ต่อเมื่อมีข้อมูล) */}
-                        {Object.keys(todaySummary.platformTotals).length > 0 && (
-                          <div className="bg-white border border-gray-100 rounded-xl p-4 mb-6 text-left">
-                            <h4 className="text-sm font-bold text-gray-700 mb-3">แยกตามค่ายที่วิ่งวันนี้</h4>
-                            <div className="space-y-2">
-                              {Object.entries(todaySummary.platformTotals)
-                                .sort(([,a], [,b]) => b - a)
-                                .map(([plat, val]) => (
-                                <div key={plat} className="flex justify-between text-sm">
-                                  <span className="text-gray-600 flex items-center">
-                                    <span className={`w-2 h-2 rounded-full mr-2 ${PLATFORMS[plat]?.color || 'bg-gray-500'}`}></span>
-                                    {plat}
-                                  </span>
-                                  <span className="font-semibold text-gray-800">฿{val.toLocaleString('th-TH')}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
 
                         <button onClick={closeModal} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-700 shadow-md active:scale-[0.98] transition">
                           ปิดหน้าต่าง
@@ -784,7 +930,6 @@
           );
         }
 
-        // เริ่มต้นเรนเดอร์ React App
         const root = createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
