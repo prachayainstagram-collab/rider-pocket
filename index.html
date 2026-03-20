@@ -5,16 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rider Pocket - ระบบบัญชีไรเดอร์</title>
     
-    <!-- เพิ่ม Meta Tags สำหรับการทำเป็น App บนมือถือ (PWA) -->
     <meta name="theme-color" content="#4f46e5">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     
-    <!-- นำเข้า Tailwind CSS เพื่อจัดการความสวยงาม -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- ปรับแต่งพฤติกรรมบนมือถือเพิ่มเติม -->
     <style>
         /* จัดการขอบจอด้านล่างสำหรับ iPhone/Android รุ่นใหม่ */
         .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 10px); }
@@ -24,14 +21,11 @@
         input[type="number"], input[type="date"], input[type="time"], input[type="text"] { font-size: 16px !important; }
     </style>
 
-    <!-- นำเข้า Babel เพื่อแปลภาษา React (JSX) ให้เบราว์เซอร์เข้าใจ -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-gray-50">
-    <!-- จุดที่ React จะนำแอปมาแสดงผล -->
     <div id="root"></div>
 
-    <!-- โค้ด React ของแอปพลิเคชัน -->
     <script type="text/babel" data-type="module">
         // นำเข้า React และเครื่องมือที่จำเป็นผ่านเครือข่าย
         import React, { useState, useMemo, useEffect } from 'https://esm.sh/react@18.2.0';
@@ -40,6 +34,11 @@
           Wallet, TrendingUp, TrendingDown, PlusCircle, List as ListIcon, 
           Home, Trash2, Calendar, DollarSign, Bike, Coffee, Wrench, Wifi, MoreHorizontal, Clock 
         } from 'https://esm.sh/lucide-react@0.292.0';
+
+        // นำเข้า Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ข้อมูลแพลตฟอร์มต่างๆ และสี
         const PLATFORMS = {
@@ -61,13 +60,33 @@
           'อื่นๆ': { icon: MoreHorizontal, color: 'text-gray-500' }
         };
 
-        // 🔴 นำ URL ที่ได้จาก Google Apps Script มาใส่ในเครื่องหมายคำพูดด้านล่างนี้ 🔴
-        const GOOGLE_SCRIPT_URL = ''; 
+        // 🔴 นำ Firebase Config ของคุณมาวางที่นี่ 🔴
+        const myFirebaseConfig = {
+          apiKey: "AIzaSyAOuX9u4eYf8OVFS_Djqceu1MAiasPa5Wc",
+          authDomain: "rider-ca9e9.firebaseapp.com",
+          projectId: "rider-ca9e9",
+          storageBucket: "rider-ca9e9.firebasestorage.app",
+          messagingSenderId: "445078558662",
+          appId: "1:445078558662:web:e832ac83b64280304944c7",
+          measurementId: "G-LWCVR69NMD"
+        };
+
+        // ตรวจสอบว่ารันบนหน้าต่างพรีวิว หรือ GitHub Pages เพื่อเลือกใช้ Config ที่ถูกต้อง
+        const isCanvasEnv = typeof __firebase_config !== 'undefined';
+        const finalFirebaseConfig = isCanvasEnv ? JSON.parse(__firebase_config) : myFirebaseConfig;
+        const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'rider-pocket';
+
+        // ตั้งค่าระบบฐานข้อมูล Firebase
+        const app = initializeApp(finalFirebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
 
         function App() {
           const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, add, history
           const [records, setRecords] = useState([]);
-          const [isLoading, setIsLoading] = useState(false);
+          const [isLoading, setIsLoading] = useState(true);
+          const [connectionError, setConnectionError] = useState('');
+          const [user, setUser] = useState(null);
           
           // Form State
           const [formType, setFormType] = useState('income');
@@ -78,21 +97,60 @@
           const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
           const [time, setTime] = useState(new Date().toTimeString().split(' ')[0].substring(0, 5));
 
-          // ดึงข้อมูลจาก Google Sheets เมื่อเปิดแอปขึ้นมา
+          // 1. จัดการระบบล็อกอิน (แบบไม่ระบุตัวตน - Anonymous) เพื่อให้มีสิทธิ์บันทึกข้อมูล
           useEffect(() => {
-            if (!GOOGLE_SCRIPT_URL) return;
+            const initAuth = async () => {
+              try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                  await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                  await signInAnonymously(auth);
+                }
+              } catch (error) {
+                console.error("Auth error:", error);
+                setConnectionError(`Auth error: ${error.message} (อย่าลืมเปิด Anonymous Auth ในหน้าเว็บ Firebase นะครับ)`);
+              }
+            };
+            initAuth();
+            
+            const unsubscribe = onAuthStateChanged(auth, setUser);
+            return () => unsubscribe();
+          }, []);
+
+          // 2. ดึงข้อมูลจาก Firebase Firestore แบบ Real-time
+          useEffect(() => {
+            if (!user) return;
             
             setIsLoading(true);
-            fetch(GOOGLE_SCRIPT_URL)
-              .then(res => res.json())
-              .then(data => {
-                if(data && data.records) {
-                  setRecords(data.records);
-                }
-              })
-              .catch(err => console.error("เกิดข้อผิดพลาดในการดึงข้อมูล:", err))
-              .finally(() => setIsLoading(false));
-          }, []);
+            setConnectionError('');
+            
+            // อ้างอิงไปยังกล่องเก็บข้อมูลของผู้ใช้นี้ (แยกกล่องของใครของมันด้วยรหัส user.uid)
+            const recordsRef = collection(db, 'artifacts', currentAppId, 'users', user.uid, 'records');
+            
+            // onSnapshot จะดึงข้อมูลและอัปเดตหน้าจอทันทีที่มีการเปลี่ยนแปลง
+            const unsubscribe = onSnapshot(recordsRef, (snapshot) => {
+              const data = [];
+              snapshot.forEach((doc) => {
+                data.push({ id: doc.id, ...doc.data() });
+              });
+              
+              // เรียงวันที่และเวลา จากใหม่ไปเก่า
+              data.sort((a, b) => {
+                const dateA = new Date(a.date + 'T' + (a.time || '00:00'));
+                const dateB = new Date(b.date + 'T' + (b.time || '00:00'));
+                return dateB - dateA;
+              });
+              
+              setRecords(data);
+              setIsLoading(false);
+            }, (error) => {
+              console.error("Firebase fetch error:", error);
+              setConnectionError("ไม่สามารถดึงข้อมูลได้ โปรดตรวจสอบ Rules ของ Firestore ว่าอนุญาตให้อ่าน/เขียนหรือไม่");
+              setIsLoading(false);
+            });
+            
+            return () => unsubscribe(); // ยกเลิกการดึงข้อมูลเมื่อปิดหน้าแอป
+          }, [user]);
 
           // คำนวณสรุปยอด
           const summary = useMemo(() => {
@@ -121,57 +179,64 @@
             };
           }, [records]);
 
-          // จัดการการบันทึกข้อมูล
+          // 3. จัดการการบันทึกข้อมูลลง Firebase
           const handleSave = async (e) => {
             e.preventDefault();
-            if (!amount || isNaN(amount) || amount <= 0) return;
+            if (!amount || isNaN(amount) || amount <= 0 || !user) return;
 
             const newRecord = {
-              id: Date.now().toString(),
               type: formType,
               amount: parseFloat(amount),
               date: date,
               time: time,
               note: note,
-              ...(formType === 'income' ? { platform } : { category })
+              ...(formType === 'income' ? { platform } : { category }),
+              timestamp: new Date().toISOString()
             };
-
-            // อัปเดตหน้าจอทันทีเพื่อให้ผู้ใช้รู้สึกว่าแตะแล้วติดเลย
-            setRecords([newRecord, ...records]);
             
-            // ส่งข้อมูลไปบันทึกที่ Google Sheets แบบเบื้องหลัง
-            if (GOOGLE_SCRIPT_URL) {
-              try {
-                await fetch(GOOGLE_SCRIPT_URL, {
-                  method: 'POST',
-                  mode: 'no-cors', // ป้องกันปัญหา CORS Policy
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify(newRecord)
-                });
-              } catch (error) {
-                console.error("บันทึกข้อมูลลง Google Sheets ไม่สำเร็จ:", error);
-              }
+            try {
+              // สร้าง Document ใหม่พร้อม ID อัตโนมัติใน Firebase
+              const newDocRef = doc(collection(db, 'artifacts', currentAppId, 'users', user.uid, 'records'));
+              await setDoc(newDocRef, newRecord);
+              
+              // ล้างฟอร์ม (หน้าจอประวัติจะอัปเดตเองแบบ Real-time)
+              setAmount('');
+              setNote('');
+              setTime(new Date().toTimeString().split(' ')[0].substring(0, 5));
+              setActiveTab('dashboard');
+            } catch (error) {
+              console.error("บันทึกข้อมูลลง Firebase ไม่สำเร็จ:", error);
+              setConnectionError("บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือเช็ค Rule");
             }
-            
-            // Reset form
-            setAmount('');
-            setNote('');
-            setTime(new Date().toTimeString().split(' ')[0].substring(0, 5));
-            setActiveTab('dashboard');
           };
 
-          const deleteRecord = (id) => {
-            setRecords(records.filter(r => r.id !== id));
+          // 4. ลบข้อมูลจาก Firebase
+          const deleteRecord = async (id) => {
+            if (!user) return;
+            try {
+              await deleteDoc(doc(db, 'artifacts', currentAppId, 'users', user.uid, 'records', id));
+            } catch (error) {
+              console.error("Delete error:", error);
+            }
           };
 
           // --- ส่วนประกอบ UI ---
           const renderDashboard = () => (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              
+              {/* ส่วนแสดง Error (ถ้ามี) */}
+              {connectionError && (
+                <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm border border-red-200">
+                  ⚠️ {connectionError}
+                </div>
+              )}
+
               {/* การ์ดสรุปยอดรวม */}
               <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-5 text-white shadow-lg">
-                <h2 className="text-blue-100 text-sm font-medium mb-1">กำไรสุทธิ (บาท)</h2>
+                <div className="flex justify-between items-center mb-1">
+                  <h2 className="text-blue-100 text-sm font-medium">กำไรสุทธิ (บาท)</h2>
+                  {isLoading && <span className="text-xs text-blue-200 animate-pulse">กำลังซิงค์...</span>}
+                </div>
                 <div className="text-4xl font-bold tracking-tight">
                   ฿{summary.net.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
@@ -221,7 +286,7 @@
                   </div>
                 ) : (
                   <div className="text-center text-gray-400 py-4 text-sm">
-                    ยังไม่มีข้อมูลรายรับ
+                    {isLoading ? 'กำลังโหลดข้อมูล...' : 'ยังไม่มีข้อมูลรายรับ'}
                   </div>
                 )}
               </div>
@@ -385,7 +450,12 @@
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 min-h-[60vh] animate-in fade-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-xl font-bold text-gray-800 mb-4">ประวัติการบันทึก</h2>
               
-              {records.length === 0 ? (
+              {isLoading && records.length === 0 ? (
+                <div className="text-center text-gray-400 py-10 flex flex-col items-center">
+                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mb-4"></div>
+                   <p>กำลังดึงข้อมูลจาก Firebase...</p>
+                </div>
+              ) : records.length === 0 ? (
                 <div className="text-center text-gray-400 py-10 flex flex-col items-center">
                   <ListIcon className="w-12 h-12 mb-2 text-gray-300" />
                   <p>ยังไม่มีประวัติการบันทึก</p>
@@ -481,3 +551,13 @@
     </script>
 </body>
 </html>
+```
+
+### 🚀 ขั้นตอนอัปโหลดโค้ดชุดใหม่
+1. ก๊อปปี้โค้ดด้านบนทั้งหมดไปวางทับในไฟล์ `index.html` ของคุณ
+2. กด `Save` (บันทึกไฟล์)
+3. ไปที่ Terminal ของ VS Code แล้วพิมพ์:
+   ```bash
+   git add .
+   git commit -m "อัปเดตโค้ดสมบูรณ์และเปลี่ยนเป็น Firebase"
+   git push
